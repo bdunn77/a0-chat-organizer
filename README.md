@@ -44,15 +44,14 @@ usr/plugins/chat_organizer/
 
 This plugin uses only Agent Zero built-in APIs. No pip packages or external services required.
 
-## Reorder & Folder Rules (v1.2.0)
+## Reorder & Folder Rules (v1.2.1)
 
 To keep behavior predictable and avoid accidental folder assignment:
 
-- The default Agent Zero chat list keeps its native ordering (newest first); the plugin no longer reorders it globally.
+- The default Agent Zero chat list reflects your saved ordering (Unfiled chats keep your reorder, then folder chats follow in their folder order).
 - Dragging a chat onto a **folder row** assigns the chat to that folder.
 - Dragging a chat onto the **Unfiled** row removes it from any folder.
-- Dragging a chat **above/below another chat** only reorders within the same container — it will never silently move a chat into a different folder.
-- Reordering by dragging is only active when a specific folder filter (or Unfiled) is selected. In **All Chats** view, reorder-by-drag is intentionally disabled.
+- Dragging a chat **above/below another chat** reorders within that chat's container (Unfiled chats reorder unfiled, folder chats reorder within their folder). It will never silently move a chat into a different folder.
 - Use the right-click chat menu to explicitly move a chat to any folder.
 - ESC cancels an in-progress drag.
 - Auto-scroll kicks in near the top/bottom edges of the sidebar while dragging.

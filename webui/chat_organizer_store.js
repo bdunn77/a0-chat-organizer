@@ -258,11 +258,49 @@ export const store = createStore("chatOrganizer", {
   },
 
   _syncChatsStoreOrder() {
-    // Intentionally no-op: never reorder Agent Zero's default chat list.
-    // The default sidebar must keep its native ordering (newest first) to avoid
-    // surprising the user. Folder ordering is only used when the user picks a
-    // specific folder filter, which renders chats via _applyFilter() show/hide.
-    return;
+    // Apply saved order to the default chat list so reordering in the sidebar
+    // visually persists. Critically, this does NOT change folder membership —
+    // it only reorders chats within their existing containers.
+    //
+    // Order strategy: orphan_order first (the visible "top" of the sidebar),
+    // then folder chats in their folder order. Untracked/new chats keep their
+    // native position at the end.
+    const chats = this.getChatsStore();
+    if (!chats?.contexts?.length || !this.tree) return;
+
+    const current = chats.contexts;
+    const byId = new Map(current.map(ctx => [ctx.id, ctx]));
+    const used = new Set();
+    const ordered = [];
+
+    // Orphan chats first (in saved orphan_order)
+    for (const id of this.getOrphanIds()) {
+      if (byId.has(id) && !used.has(id)) {
+        ordered.push(byId.get(id));
+        used.add(id);
+      }
+    }
+
+    // Then folder chats in folder order (preserves user-defined folder grouping)
+    const pushFolder = (folder) => {
+      for (const id of folder.chat_ids || []) {
+        if (byId.has(id) && !used.has(id)) {
+          ordered.push(byId.get(id));
+          used.add(id);
+        }
+      }
+      for (const child of folder.children || []) pushFolder(child);
+    };
+    for (const folder of this.tree?.folders || []) pushFolder(folder);
+
+    // Anything not yet placed (brand-new chats, untracked) keeps native order
+    for (const ctx of current) {
+      if (!used.has(ctx.id)) ordered.push(ctx);
+    }
+
+    if (ordered.length !== current.length) return;
+    const changed = ordered.some((ctx, i) => ctx.id !== current[i]?.id);
+    if (changed) chats.contexts = [...ordered];
   },
 
   // Filtering: show/hide default chat-container elements
@@ -662,31 +700,25 @@ export const store = createStore("chatOrganizer", {
   },
 
   async dropChatNearChat(draggedCtxid, targetCtxid, position = 'before') {
-    // Strict rules to avoid the auto-assign-to-folder bug:
-    //   - Reordering only changes the order WITHIN a single container.
-    //   - Folder membership only changes via an explicit folder drop or the
-    //     right-click chat context menu.
-    //   - When the user is viewing "All Chats" we cannot deduce a safe
-    //     container, so we no-op rather than guess.
+    // Reorder rules:
+    //   - Drop above/below a chat in the SAME container -> reorder within that container.
+    //   - Drop above/below a chat in a DIFFERENT container -> blocked (folder
+    //     membership only changes via explicit folder drop or right-click menu).
+    //   - This works in any view (All Chats, Unfiled, or a specific folder).
     const targetFolder = findFolderForChat(targetCtxid, this.tree?.folders || []);
     const draggedFolder = findFolderForChat(draggedCtxid, this.tree?.folders || []);
     const targetFolderId = targetFolder?.id || "";
     const draggedFolderId = draggedFolder?.id || "";
 
-    // Block cross-container reorders. The dragged chat stays where it is.
     if (draggedFolderId !== targetFolderId) {
-      toastFrontendInfo && toastFrontendInfo("Drop on a folder to move the chat.", "Chat Organizer");
+      // Cross-container: do not silently move folder membership.
+      if (typeof toastFrontendInfo === 'function') {
+        toastFrontendInfo("Drop on a folder row to move the chat to a folder.", "Chat Organizer");
+      }
       return;
     }
 
-    // Block reordering when the user is in "All Chats" view, because that view
-    // has no canonical per-container order to mutate.
-    if (this.activeFilter === null) {
-      toastFrontendInfo && toastFrontendInfo("Open a folder or Unfiled to reorder chats.", "Chat Organizer");
-      return;
-    }
-
-    // Now safe: reorder within the shared container.
+    // Same container: reorder.
     let ids = this.getFolderIds(targetFolderId).filter(id => id !== draggedCtxid);
     let index = ids.indexOf(targetCtxid);
     if (index < 0) index = ids.length;
