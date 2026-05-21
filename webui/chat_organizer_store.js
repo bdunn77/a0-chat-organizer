@@ -259,12 +259,11 @@ export const store = createStore("chatOrganizer", {
 
   _syncChatsStoreOrder() {
     // Apply saved order to the default chat list so reordering in the sidebar
-    // visually persists. Critically, this does NOT change folder membership —
-    // it only reorders chats within their existing containers.
+    // visually persists. Folder membership is NEVER changed here.
     //
-    // Order strategy: orphan_order first (the visible "top" of the sidebar),
-    // then folder chats in their folder order. Untracked/new chats keep their
-    // native position at the end.
+    // Strategy: if a unified visible_order is saved (from drag-reorder in the
+    // sidebar), use it directly. Otherwise fall back to: orphan_order first,
+    // then folder chats in folder order. Untracked/new chats are appended.
     const chats = this.getChatsStore();
     if (!chats?.contexts?.length || !this.tree) return;
 
@@ -273,27 +272,36 @@ export const store = createStore("chatOrganizer", {
     const used = new Set();
     const ordered = [];
 
-    // Orphan chats first (in saved orphan_order)
-    for (const id of this.getOrphanIds()) {
-      if (byId.has(id) && !used.has(id)) {
-        ordered.push(byId.get(id));
-        used.add(id);
-      }
-    }
-
-    // Then folder chats in folder order (preserves user-defined folder grouping)
-    const pushFolder = (folder) => {
-      for (const id of folder.chat_ids || []) {
+    const visibleOrder = this.tree?.visible_order || [];
+    if (visibleOrder.length > 0) {
+      // Use the unified saved order
+      for (const id of visibleOrder) {
         if (byId.has(id) && !used.has(id)) {
           ordered.push(byId.get(id));
           used.add(id);
         }
       }
-      for (const child of folder.children || []) pushFolder(child);
-    };
-    for (const folder of this.tree?.folders || []) pushFolder(folder);
+    } else {
+      // Fallback: orphans first, then folder chats
+      for (const id of this.getOrphanIds()) {
+        if (byId.has(id) && !used.has(id)) {
+          ordered.push(byId.get(id));
+          used.add(id);
+        }
+      }
+      const pushFolder = (folder) => {
+        for (const id of folder.chat_ids || []) {
+          if (byId.has(id) && !used.has(id)) {
+            ordered.push(byId.get(id));
+            used.add(id);
+          }
+        }
+        for (const child of folder.children || []) pushFolder(child);
+      };
+      for (const folder of this.tree?.folders || []) pushFolder(folder);
+    }
 
-    // Anything not yet placed (brand-new chats, untracked) keeps native order
+    // Anything not yet placed (brand-new chats) appended at end
     for (const ctx of current) {
       if (!used.has(ctx.id)) ordered.push(ctx);
     }
@@ -714,43 +722,21 @@ export const store = createStore("chatOrganizer", {
   },
 
   async dropChatNearChat(draggedCtxid, targetCtxid, position = 'before') {
-    // Reorder rules:
-    //   - Drop above/below a chat in the SAME container -> straightforward intra-container reorder.
-    //   - Drop above/below a chat in a DIFFERENT container -> visual cross-container reorder:
-    //     the dragged chat KEEPS its folder membership, but its position within its container
-    //     is updated so the resulting visible sidebar order matches where the user dropped it.
-    //   - Folder membership only changes via explicit folder drop or right-click menu.
-    //   - This works in any view (All Chats, Unfiled, or a specific folder).
-    const targetFolder = findFolderForChat(targetCtxid, this.tree?.folders || []);
-    const draggedFolder = findFolderForChat(draggedCtxid, this.tree?.folders || []);
-    const targetFolderId = targetFolder?.id || "";
-    const draggedFolderId = draggedFolder?.id || "";
-
-    if (draggedFolderId === targetFolderId) {
-      // Same container: simple intra-container reorder using the saved order.
-      let ids = this.getFolderIds(targetFolderId).filter(id => id !== draggedCtxid);
-      let index = ids.indexOf(targetCtxid);
-      if (index < 0) index = ids.length;
-      if (position === 'after') index += 1;
-      ids.splice(index, 0, draggedCtxid);
-      await this.reorderChats(targetFolderId, ids);
-      return;
-    }
-
-    // Cross-container: keep the dragged chat in its own container, but reorder
-    // within that container so the visible sidebar order matches the drop.
+    // Reorder by drag persists a unified visible_order so the dragged chat
+    // moves to ITS EXACT visual position in the sidebar — regardless of which
+    // containers (folder/unfiled) the dragged and target chats belong to.
     //
-    // Strategy: take the current visible DOM order of chats in the sidebar,
-    // simulate inserting the dragged chat before/after the target, then keep
-    // only chats that belong to the dragged chat's container. That filtered
-    // sequence becomes the new chat_ids order for the dragged container.
+    // Folder membership is NEVER changed here. It only changes via explicit
+    // folder-row drop or right-click chat context menu.
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
+
+    // Read the current visible DOM order of chats in the sidebar.
     const visibleIds = Array.from(list.querySelectorAll('.chat-container'))
       .map(el => el.getAttribute('data-ctxid'))
       .filter(Boolean);
 
-    // Remove dragged from current visible order, then re-insert at the drop point.
+    // Remove dragged from current visible order, then re-insert at drop point.
     const withoutDragged = visibleIds.filter(id => id !== draggedCtxid);
     let targetIndex = withoutDragged.indexOf(targetCtxid);
     if (targetIndex < 0) {
@@ -766,18 +752,15 @@ export const store = createStore("chatOrganizer", {
       ...withoutDragged.slice(targetIndex),
     ];
 
-    // Build the new chat_ids order for the dragged chat's container by keeping
-    // only IDs belonging to that container, in the new visible order.
-    const draggedContainerIds = new Set(this.getFolderIds(draggedFolderId));
-    draggedContainerIds.add(draggedCtxid); // ensure dragged is included
-    const newContainerOrder = newVisibleOrder.filter(id => draggedContainerIds.has(id));
-
-    // Append any container chats not visible (safety net for filtered views).
-    for (const id of this.getFolderIds(draggedFolderId)) {
-      if (!newContainerOrder.includes(id)) newContainerOrder.push(id);
+    // Persist the unified order. Folder membership unchanged.
+    try {
+      await api("set_visible_order", { ctxids: newVisibleOrder });
+      await this.loadTree();
+      toastFrontendSuccess("Chats reordered", "Chat Organizer");
+    } catch (e) {
+      console.error("ChatOrganizer: reorder failed", e);
+      toastFrontendError("Failed to reorder chats", "Chat Organizer");
     }
-
-    await this.reorderChats(draggedFolderId, newContainerOrder);
   },
 
   // ── Folder context menu ──

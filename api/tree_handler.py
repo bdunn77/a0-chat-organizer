@@ -27,6 +27,7 @@ def _load_tree() -> dict[str, Any]:
         return _default_tree()
     raw.setdefault("folders", [])
     raw.setdefault("orphan_order", [])
+    raw.setdefault("visible_order", [])
     return raw
 
 
@@ -39,7 +40,7 @@ def _save_tree(tree: dict[str, Any]) -> None:
 
 
 def _default_tree() -> dict[str, Any]:
-    return {"folders": [], "orphan_order": []}
+    return {"folders": [], "orphan_order": [], "visible_order": []}
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +99,8 @@ class TreeHandler(ApiHandler):
             return self._reorder(input)
         if action == "set_orphan_order":
             return self._set_orphan_order(input)
+        if action == "set_visible_order":
+            return self._set_visible_order(input)
 
         return Response("Unknown action", 400)
 
@@ -243,6 +246,18 @@ class TreeHandler(ApiHandler):
 
         tree = _load_tree()
         tree["orphan_order"] = ctxids
+        _save_tree(tree)
+        return {"ok": True}
+
+
+    def _set_visible_order(self, input: Input) -> Output:
+        """Persist the unified sidebar order (all chats, mixed folder + unfiled)."""
+        ctxids = input.get("ctxids")
+        if not isinstance(ctxids, list):
+            return Response("ctxids must be a list", 400)
+
+        tree = _load_tree()
+        tree["visible_order"] = [str(c) for c in ctxids if c]
         _save_tree(tree)
         return {"ok": True}
 
