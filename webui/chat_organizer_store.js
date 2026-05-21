@@ -3,6 +3,7 @@ import { callJsonApi } from "/js/api.js";
 import { toastFrontendError, toastFrontendSuccess } from "/components/notifications/notification-store.js";
 
 const PLUGIN = "chat_organizer";
+const CHAT_DRAG_TYPE = "application/x-chat-organizer-ctxid";
 
 async function api(action, body = {}) {
   return await callJsonApi(`/plugins/${PLUGIN}/tree_handler`, { ...body, action });
@@ -75,6 +76,11 @@ export const store = createStore("chatOrganizer", {
   editValue: "",
   expanded: {},
   activeFilter: null,
+  draggedCtxid: null,
+  dragOverFolderId: null,
+  dragOverChatId: null,
+  dragOverChatPosition: null,
+  _attachmentOverlayPatched: false,
 
   init() {
     if (!this.tree) this.loadTree();
@@ -88,6 +94,11 @@ export const store = createStore("chatOrganizer", {
   cleanup() {
     this.contextMenu = null;
     this.chatContextMenu = null;
+    this.draggedCtxid = null;
+    this.dragOverFolderId = null;
+    this.dragOverChatId = null;
+    this.dragOverChatPosition = null;
+    this._hideAttachmentOverlay();
     this._stopObserver();
     this._clearFilter();
     this._removeChatInteractions();
@@ -98,6 +109,7 @@ export const store = createStore("chatOrganizer", {
       this.tree = await api("get_tree");
       this.tree.folders ||= [];
       this.tree.orphan_order ||= [];
+      this._syncChatsStoreOrder();
       this._applyFilter();
     } catch (e) {
       console.error("ChatOrganizer: failed to load tree", e);
@@ -158,6 +170,17 @@ export const store = createStore("chatOrganizer", {
     await this.moveChat(ctxid, "");
   },
 
+  async reorderChats(folderId, ctxids) {
+    try {
+      await api("reorder", { folder_id: folderId || "", ctxids });
+      await this.loadTree();
+      toastFrontendSuccess("Chats reordered", "Chat Organizer");
+    } catch (e) {
+      console.error("ChatOrganizer: reorder failed", e);
+      toastFrontendError("Failed to reorder chats", "Chat Organizer");
+    }
+  },
+
   isExpanded(id) { return !!this.expanded[id]; },
 
   toggleFolder(id) {
@@ -171,7 +194,25 @@ export const store = createStore("chatOrganizer", {
 
   getOrphanIds() {
     const assigned = collectAssignedIds(this.tree?.folders || []);
-    return this.getAllChats().filter(c => !assigned.has(c.id)).map(c => c.id);
+    const ids = this.getAllChats().filter(c => !assigned.has(c.id)).map(c => c.id);
+    const available = new Set(ids);
+    const ordered = [];
+    for (const id of this.tree?.orphan_order || []) {
+      if (available.has(id)) {
+        ordered.push(id);
+        available.delete(id);
+      }
+    }
+    for (const id of ids) {
+      if (available.has(id)) ordered.push(id);
+    }
+    return ordered;
+  },
+
+  getFolderIds(folderId) {
+    if (!folderId) return this.getOrphanIds();
+    const folder = findFolder(folderId, this.tree?.folders || []);
+    return folder ? [...(folder.chat_ids || [])] : [];
   },
 
   getFolderForChat(ctxid) {
@@ -194,14 +235,53 @@ export const store = createStore("chatOrganizer", {
     return rows;
   },
 
+  _getTreeOrderedIds() {
+    const ids = [];
+    const pushFolder = (folder) => {
+      for (const id of folder.chat_ids || []) ids.push(id);
+      for (const child of folder.children || []) pushFolder(child);
+    };
+    for (const folder of this.tree?.folders || []) pushFolder(folder);
+    for (const id of this.getOrphanIds()) ids.push(id);
+    return ids;
+  },
+
+  _syncChatsStoreOrder() {
+    const chats = this.getChatsStore();
+    if (!chats?.contexts?.length || !this.tree) return;
+
+    const current = chats.contexts;
+    const byId = new Map(current.map(ctx => [ctx.id, ctx]));
+    const used = new Set();
+    const ordered = [];
+
+    for (const id of this._getTreeOrderedIds()) {
+      if (byId.has(id) && !used.has(id)) {
+        ordered.push(byId.get(id));
+        used.add(id);
+      }
+    }
+
+    // Keep brand-new/untracked chats visible; append them in the framework's current order.
+    for (const ctx of current) {
+      if (!used.has(ctx.id)) ordered.push(ctx);
+    }
+
+    if (ordered.length !== current.length) return;
+    const changed = ordered.some((ctx, i) => ctx.id !== current[i]?.id);
+    if (changed) chats.contexts = [...ordered];
+  },
+
   // Filtering: show/hide default chat-container elements
   setFilter(folderId) {
     this.activeFilter = folderId;
+    this._syncChatsStoreOrder();
     this._applyFilter();
   },
 
   clearFilter() {
     this.activeFilter = null;
+    this._syncChatsStoreOrder();
     this._applyFilter();
   },
 
@@ -235,9 +315,11 @@ export const store = createStore("chatOrganizer", {
     this._stopObserver();
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
+    this._patchAttachmentOverlay();
     this._tagChatItems();
     this._attachChatInteractions();
     this._observer = new MutationObserver(() => {
+      this._syncChatsStoreOrder();
       this._tagChatItems();
       this._attachChatInteractions();
       this._applyFilter();
@@ -255,7 +337,8 @@ export const store = createStore("chatOrganizer", {
     if (!list) return;
     const items = list.querySelectorAll('.chat-container');
     items.forEach((el, i) => {
-      if (!el.getAttribute('data-ctxid') && chats[i]) {
+      if (chats[i]) {
+        // Always refresh: Alpine may reuse DOM nodes when contexts are reordered.
         el.setAttribute('data-ctxid', chats[i].id);
       }
     });
@@ -268,17 +351,65 @@ export const store = createStore("chatOrganizer", {
       if (self._attachedChats.has(el)) return;
       self._attachedChats.add(el);
 
-      // Make draggable
+      // Make default Agent Zero chat rows draggable as internal chat-organizer items.
       el.setAttribute('draggable', 'true');
+      el.classList.add('co-chat-draggable');
+
       el.addEventListener('dragstart', function(ev) {
         const ctxid = el.getAttribute('data-ctxid');
-        if (ctxid) {
-          ev.dataTransfer.effectAllowed = 'move';
-          ev.dataTransfer.setData('text/plain', ctxid);
-        }
+        if (!ctxid) return;
+        self.draggedCtxid = ctxid;
+        window.__chatOrganizerDraggingChat = true;
+        self._patchAttachmentOverlay();
+        self._hideAttachmentOverlay();
+        ev.dataTransfer.effectAllowed = 'move';
+        ev.dataTransfer.setData(CHAT_DRAG_TYPE, ctxid);
+        ev.dataTransfer.setData('text/plain', ctxid);
+        el.classList.add('co-chat-dragging');
       });
 
-      // Right-click context menu on chat
+      el.addEventListener('dragend', function() {
+        self._clearDragState();
+      });
+
+      // Let chats be reordered by dropping above/below another visible chat.
+      el.addEventListener('dragenter', function(ev) {
+        if (!self._isInternalChatDrag(ev)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+      });
+
+      el.addEventListener('dragover', function(ev) {
+        if (!self._isInternalChatDrag(ev)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        ev.dataTransfer.dropEffect = 'move';
+        self._hideAttachmentOverlay();
+        const targetCtxid = el.getAttribute('data-ctxid');
+        if (!targetCtxid || targetCtxid === self.draggedCtxid) return;
+        const rect = el.getBoundingClientRect();
+        const pos = ev.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+        self._setChatDropIndicator(el, targetCtxid, pos);
+      });
+
+      el.addEventListener('dragleave', function(ev) {
+        if (!self._isInternalChatDrag(ev)) return;
+        if (!el.contains(ev.relatedTarget)) self._clearChatDropIndicator(el);
+      });
+
+      el.addEventListener('drop', async function(ev) {
+        if (!self._isInternalChatDrag(ev)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const dragged = ev.dataTransfer.getData(CHAT_DRAG_TYPE) || ev.dataTransfer.getData('text/plain') || self.draggedCtxid;
+        const target = el.getAttribute('data-ctxid');
+        const position = self.dragOverChatPosition || 'before';
+        self._clearChatDropIndicators();
+        if (dragged && target && dragged !== target) await self.dropChatNearChat(dragged, target, position);
+        self._clearDragState();
+      });
+
+      // Right-click context menu on chat.
       el.addEventListener('contextmenu', function(ev) {
         const ctxid = el.getAttribute('data-ctxid');
         if (ctxid) {
@@ -294,6 +425,67 @@ export const store = createStore("chatOrganizer", {
     const items = document.querySelectorAll('.chats-config-list .chat-container');
     items.forEach((el) => {
       el.removeAttribute('draggable');
+      el.classList.remove('co-chat-draggable', 'co-chat-dragging', 'co-drop-before', 'co-drop-after');
+    });
+  },
+
+  _isInternalChatDrag(ev) {
+    const types = Array.from(ev?.dataTransfer?.types || []);
+    return window.__chatOrganizerDraggingChat || types.includes(CHAT_DRAG_TYPE);
+  },
+
+  _patchAttachmentOverlay() {
+    if (this._attachmentOverlayPatched) return;
+    const attachments = window.Alpine?.store?.('chatAttachments');
+    if (!attachments || attachments.__chatOrganizerPatched) return;
+    const originalShow = attachments.showDragDropOverlay?.bind(attachments);
+    const originalHide = attachments.hideDragDropOverlay?.bind(attachments);
+    if (!originalShow || !originalHide) return;
+    attachments.__chatOrganizerPatched = true;
+    attachments.__chatOrganizerOriginalShow = originalShow;
+    attachments.__chatOrganizerOriginalHide = originalHide;
+    attachments.showDragDropOverlay = function() {
+      if (window.__chatOrganizerDraggingChat) {
+        this.dragDropOverlayVisible = false;
+        return;
+      }
+      return originalShow();
+    };
+    attachments.hideDragDropOverlay = function() {
+      return originalHide();
+    };
+    this._attachmentOverlayPatched = true;
+  },
+
+  _hideAttachmentOverlay() {
+    const attachments = window.Alpine?.store?.('chatAttachments');
+    if (attachments) attachments.dragDropOverlayVisible = false;
+  },
+
+  _clearDragState() {
+    window.__chatOrganizerDraggingChat = false;
+    this.draggedCtxid = null;
+    this.dragOverFolderId = null;
+    this.dragOverChatId = null;
+    this.dragOverChatPosition = null;
+    this._clearChatDropIndicators();
+    document.querySelectorAll('.co-chat-dragging').forEach(el => el.classList.remove('co-chat-dragging'));
+  },
+
+  _setChatDropIndicator(el, ctxid, position) {
+    this._clearChatDropIndicators();
+    this.dragOverChatId = ctxid;
+    this.dragOverChatPosition = position;
+    el.classList.add(position === 'before' ? 'co-drop-before' : 'co-drop-after');
+  },
+
+  _clearChatDropIndicator(el) {
+    el.classList.remove('co-drop-before', 'co-drop-after');
+  },
+
+  _clearChatDropIndicators() {
+    document.querySelectorAll('.co-drop-before, .co-drop-after').forEach(el => {
+      el.classList.remove('co-drop-before', 'co-drop-after');
     });
   },
 
@@ -312,6 +504,26 @@ export const store = createStore("chatOrganizer", {
   moveChatToFolder(ctxid, folderId) {
     this.closeChatContextMenu();
     this.moveChat(ctxid, folderId || "");
+  },
+
+  async dropChatNearChat(draggedCtxid, targetCtxid, position = 'before') {
+    const targetFolder = findFolderForChat(targetCtxid, this.tree?.folders || []);
+    const draggedFolder = findFolderForChat(draggedCtxid, this.tree?.folders || []);
+    const targetFolderId = targetFolder?.id || "";
+    const draggedFolderId = draggedFolder?.id || "";
+
+    // If the dragged chat is coming from another folder/unfiled, move it into the target container first.
+    if (draggedFolderId !== targetFolderId) {
+      await api("move_chat", { ctxid: draggedCtxid, folder_id: targetFolderId, position: null });
+      await this.loadTree();
+    }
+
+    let ids = this.getFolderIds(targetFolderId).filter(id => id !== draggedCtxid);
+    let index = ids.indexOf(targetCtxid);
+    if (index < 0) index = ids.length;
+    if (position === 'after') index += 1;
+    ids.splice(index, 0, draggedCtxid);
+    await this.reorderChats(targetFolderId, ids);
   },
 
   // ── Folder context menu ──
@@ -351,13 +563,29 @@ export const store = createStore("chatOrganizer", {
 
   // ── Drag-and-drop onto folders ──
   dragOverFolder(ev, folderId) {
+    if (!this._isInternalChatDrag(ev)) return;
     ev.preventDefault();
+    ev.stopPropagation();
     ev.dataTransfer.dropEffect = "move";
+    this._hideAttachmentOverlay();
+    this.dragOverFolderId = folderId || "__orphans__";
+  },
+
+  dragLeaveFolder(ev, folderId = "") {
+    if (!this._isInternalChatDrag(ev)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const key = folderId || "__orphans__";
+    if (this.dragOverFolderId === key) this.dragOverFolderId = null;
   },
 
   async dropOnFolder(ev, folderId = "") {
+    if (!this._isInternalChatDrag(ev)) return;
     ev.preventDefault();
-    const ctxid = ev.dataTransfer.getData("text/plain");
+    ev.stopPropagation();
+    const ctxid = ev.dataTransfer.getData(CHAT_DRAG_TYPE) || ev.dataTransfer.getData("text/plain") || this.draggedCtxid;
+    this.dragOverFolderId = null;
     if (ctxid) await this.moveChat(ctxid, folderId);
+    this._clearDragState();
   },
 });

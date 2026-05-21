@@ -1,18 +1,19 @@
 # Chat Organizer
 
-Organize your Agent Zero chats with folders, drag-and-drop reordering, and unlimited nesting. Adds a collapsible folder tree above the default chat list as a navigation filter panel — **compatible with Chat Rename, Favorite Chats, Chat Status Marklet, and other sidebar plugins.**
+Organize your Agent Zero chats with unlimited nested folders while keeping the default chat sidebar intact and compatible with other sidebar plugins.
 
 ## Features
 
 - **Folders** — create, rename, and delete folders to organize your chats
-- **Nested folders** — folders inside folders with unlimited depth
+- **Unlimited nested folders** — folders inside folders with recursive rendering
 - **Filter-by-folder** — click a folder to filter the default chat list to only its chats
 - **Unfiled / All Chats** — quick filter buttons to show unfiled chats or all chats
-- **Drag & drop** — drag chats from the default list onto any folder to assign them
-- **Inline rename** — click the ⋮ context menu on any folder to rename
-- **New Subfolder** — right-click (or click ⋮) any folder to create a subfolder
-- **Chat count badge** — each folder shows how many chats it contains (including nested)
-- **Plugin-compatible** — does NOT hide the default chat list; preserves all other sidebar plugin enhancements
+- **Drag chat to folder** — drag a chat from the default sidebar list onto any folder or Unfiled
+- **Right-click chat menu** — right-click any chat to move it to a folder, Unfiled, or remove it from its folder
+- **Drag reorder** — drag a chat above/below another chat to reorder within its folder or the Unfiled list
+- **Cross-folder move by reorder** — drag a chat near a chat in another folder to move it into that folder and place it there
+- **Chat count badges** — each folder shows how many chats it contains, including nested folders
+- **Plugin-compatible** — does not replace the default `.chat-container` rows, so Chat Rename, Favorite Chats, Chat Status Marklet, and similar plugins continue working
 
 ## Architecture
 
@@ -22,22 +23,21 @@ usr/plugins/chat_organizer/
 ├── README.md
 ├── LICENSE
 ├── api/
-│   └── tree_handler.py          # CRUD endpoints for folder tree (JSON persistence)
+│   └── tree_handler.py          # CRUD/reorder endpoints with JSON persistence
 ├── webui/
-│   └── chat_organizer_store.js   # Alpine.js store for the frontend
+│   └── chat_organizer_store.js   # Alpine store: folders, filtering, drag/drop, context menus
 └── extensions/
     └── webui/
         └── sidebar-chats-list-start/
-            └── chat_organizer.html  # Sidebar folder tree + filter panel
+            └── chat_organizer.html  # Sidebar folder navigation/filter panel
 ```
 
 ## How it works
 
-- **Backend** — `tree_handler.py` manages a JSON tree at `data/tree.json` with actions: `get_tree`, `create_folder`, `rename_folder`, `delete_folder`, `move_chat`, `reorder`
-- **Frontend** — Alpine store (`chatOrganizer`) loads the tree, manages context menus, inline rename, and filters
-- **Extension point** — injects at `sidebar-chats-list-start` as a folder navigation panel above the default chat list
-- **Filtering** — clicking a folder filters the default `.chat-container` elements via `display:none`; clicking "All Chats" shows everything
-- **Plugin compatibility** — the default chat list stays in the DOM so other plugins (Chat Rename, Favorite Chats, Status Marklet) continue to work
+- **Backend** — `tree_handler.py` persists folder data at `data/tree.json` and supports `get_tree`, `create_folder`, `rename_folder`, `delete_folder`, `move_chat`, `reorder`, and `set_orphan_order`.
+- **Frontend** — the `chatOrganizer` Alpine store renders the folder panel, attaches drag/drop and right-click listeners to the default chat rows, and filters/reorders `$store.chats.contexts` without replacing the default sidebar DOM.
+- **File-drop overlay guard** — internal chat drags use a plugin-specific drag type and suppress Agent Zero's file attachment overlay during chat-only drag operations.
+- **Compatibility** — default chat rows remain in the DOM, preserving other chat sidebar plugins.
 
 ## No dependencies
 

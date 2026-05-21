@@ -29,6 +29,7 @@
                     <div class="co-folder-row"
                          :class="{'co-active': $store.chatOrganizer.activeFilter === row.folder.id, 'co-drop-target': $store.chatOrganizer.dragOverFolderId === row.folder.id}"
                          :style="{ paddingLeft: (4 + row.depth * 16) + 'px' }"
+                         @dragenter="$store.chatOrganizer.dragOverFolder($event, row.folder.id)"
                          @dragover="$store.chatOrganizer.dragOverFolder($event, row.folder.id)"
                          @dragleave="$store.chatOrganizer.dragLeaveFolder($event, row.folder.id)"
                          @drop="$store.chatOrganizer.dropOnFolder($event, row.folder.id)">
@@ -53,8 +54,9 @@
 
                   <template x-if="row.type === 'orphans'">
                     <div class="co-filter-row"
-                         :class="{'co-active': $store.chatOrganizer.activeFilter === ''}"
+                         :class="{'co-active': $store.chatOrganizer.activeFilter === '', 'co-drop-target': $store.chatOrganizer.dragOverFolderId === '__orphans__'}"
                          @click="$store.chatOrganizer.setFilter('')"
+                         @dragenter="$store.chatOrganizer.dragOverFolder($event, '')"
                          @dragover="$store.chatOrganizer.dragOverFolder($event, '')"
                          @dragleave="$store.chatOrganizer.dragLeaveFolder($event, '')"
                          @drop="$store.chatOrganizer.dropOnFolder($event, '')">
@@ -159,6 +161,10 @@
     .co-menu-danger { color: var(--color-danger); }
     .co-menu-divider { margin: 4px 0; border: none; border-top: 1px solid var(--color-border); }
     .co-menu-header { padding: 6px 12px; font-size: var(--font-size-small); opacity: 0.7; }
+    .chats-config-list .chat-container.co-chat-draggable { cursor: grab; }
+    .chats-config-list .chat-container.co-chat-dragging { opacity: 0.55; }
+    .chats-config-list .chat-container.co-drop-before { border-top: 2px solid var(--color-primary) !important; }
+    .chats-config-list .chat-container.co-drop-after { border-bottom: 2px solid var(--color-primary) !important; }
   </style>
 </body>
 </html>
