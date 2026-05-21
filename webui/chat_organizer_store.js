@@ -1,6 +1,6 @@
 import { createStore } from "/js/AlpineStore.js";
 import { callJsonApi } from "/js/api.js";
-import { toastFrontendError, toastFrontendSuccess } from "/components/notifications/notification-store.js";
+import { toastFrontendError, toastFrontendSuccess, toastFrontendInfo } from "/components/notifications/notification-store.js";
 
 const PLUGIN = "chat_organizer";
 const CHAT_DRAG_TYPE = "application/x-chat-organizer-ctxid";
@@ -177,7 +177,13 @@ export const store = createStore("chatOrganizer", {
 
   async reorderChats(folderId, ctxids) {
     try {
-      await api("reorder", { folder_id: folderId || "", ctxids });
+      if (folderId) {
+        await api("reorder", { folder_id: folderId, ctxids });
+      } else {
+        // Unfiled list: persist via set_orphan_order so the tree.json keeps the
+        // explicit order even though it is not a folder.
+        await api("set_orphan_order", { ctxids });
+      }
       await this.loadTree();
       toastFrontendSuccess("Chats reordered", "Chat Organizer");
     } catch (e) {
@@ -252,29 +258,11 @@ export const store = createStore("chatOrganizer", {
   },
 
   _syncChatsStoreOrder() {
-    const chats = this.getChatsStore();
-    if (!chats?.contexts?.length || !this.tree) return;
-
-    const current = chats.contexts;
-    const byId = new Map(current.map(ctx => [ctx.id, ctx]));
-    const used = new Set();
-    const ordered = [];
-
-    for (const id of this._getTreeOrderedIds()) {
-      if (byId.has(id) && !used.has(id)) {
-        ordered.push(byId.get(id));
-        used.add(id);
-      }
-    }
-
-    // Keep brand-new/untracked chats visible; append them in the framework's current order.
-    for (const ctx of current) {
-      if (!used.has(ctx.id)) ordered.push(ctx);
-    }
-
-    if (ordered.length !== current.length) return;
-    const changed = ordered.some((ctx, i) => ctx.id !== current[i]?.id);
-    if (changed) chats.contexts = [...ordered];
+    // Intentionally no-op: never reorder Agent Zero's default chat list.
+    // The default sidebar must keep its native ordering (newest first) to avoid
+    // surprising the user. Folder ordering is only used when the user picks a
+    // specific folder filter, which renders chats via _applyFilter() show/hide.
+    return;
   },
 
   // Filtering: show/hide default chat-container elements
@@ -467,9 +455,21 @@ export const store = createStore("chatOrganizer", {
 
     this._boundPointerMove = this._boundPointerMove || ((e) => this._onPointerMove(e));
     this._boundPointerUp = this._boundPointerUp || ((e) => this._onPointerUp(e));
+    this._boundKey = this._boundKey || ((e) => { if (e.key === 'Escape') this._abortPointerDrag(); });
     document.addEventListener('pointermove', this._boundPointerMove, true);
     document.addEventListener('pointerup', this._boundPointerUp, true);
     document.addEventListener('pointercancel', this._boundPointerUp, true);
+    document.addEventListener('keydown', this._boundKey, true);
+  },
+
+  _abortPointerDrag() {
+    if (!this.pointerDrag) return;
+    this.pointerDrag = null;
+    document.removeEventListener('pointermove', this._boundPointerMove, true);
+    document.removeEventListener('pointerup', this._boundPointerUp, true);
+    document.removeEventListener('pointercancel', this._boundPointerUp, true);
+    document.removeEventListener('keydown', this._boundKey, true);
+    this._cleanupPointerDragUI();
   },
 
   _onPointerMove(ev) {
@@ -488,6 +488,17 @@ export const store = createStore("chatOrganizer", {
     drag.y = ev.clientY;
     this._moveGhost(ev.clientX, ev.clientY);
     this._updatePointerDropTarget(ev.clientX, ev.clientY);
+    this._maybeAutoScroll(ev.clientY);
+  },
+
+  _maybeAutoScroll(y) {
+    const list = document.querySelector('.chats-config-list');
+    if (!list) return;
+    const rect = list.getBoundingClientRect();
+    const zone = 38;
+    const speed = 18;
+    if (y < rect.top + zone) list.scrollTop -= speed;
+    else if (y > rect.bottom - zone) list.scrollTop += speed;
   },
 
   async _onPointerUp(ev) {
@@ -497,6 +508,7 @@ export const store = createStore("chatOrganizer", {
     document.removeEventListener('pointermove', this._boundPointerMove, true);
     document.removeEventListener('pointerup', this._boundPointerUp, true);
     document.removeEventListener('pointercancel', this._boundPointerUp, true);
+    document.removeEventListener('keydown', this._boundKey, true);
 
     if (drag.active) {
       ev.preventDefault();
@@ -650,17 +662,31 @@ export const store = createStore("chatOrganizer", {
   },
 
   async dropChatNearChat(draggedCtxid, targetCtxid, position = 'before') {
+    // Strict rules to avoid the auto-assign-to-folder bug:
+    //   - Reordering only changes the order WITHIN a single container.
+    //   - Folder membership only changes via an explicit folder drop or the
+    //     right-click chat context menu.
+    //   - When the user is viewing "All Chats" we cannot deduce a safe
+    //     container, so we no-op rather than guess.
     const targetFolder = findFolderForChat(targetCtxid, this.tree?.folders || []);
     const draggedFolder = findFolderForChat(draggedCtxid, this.tree?.folders || []);
     const targetFolderId = targetFolder?.id || "";
     const draggedFolderId = draggedFolder?.id || "";
 
-    // If the dragged chat is coming from another folder/unfiled, move it into the target container first.
+    // Block cross-container reorders. The dragged chat stays where it is.
     if (draggedFolderId !== targetFolderId) {
-      await api("move_chat", { ctxid: draggedCtxid, folder_id: targetFolderId, position: null });
-      await this.loadTree();
+      toastFrontendInfo && toastFrontendInfo("Drop on a folder to move the chat.", "Chat Organizer");
+      return;
     }
 
+    // Block reordering when the user is in "All Chats" view, because that view
+    // has no canonical per-container order to mutate.
+    if (this.activeFilter === null) {
+      toastFrontendInfo && toastFrontendInfo("Open a folder or Unfiled to reorder chats.", "Chat Organizer");
+      return;
+    }
+
+    // Now safe: reorder within the shared container.
     let ids = this.getFolderIds(targetFolderId).filter(id => id !== draggedCtxid);
     let index = ids.indexOf(targetCtxid);
     if (index < 0) index = ids.length;
