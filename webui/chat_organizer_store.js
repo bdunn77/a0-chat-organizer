@@ -4,6 +4,7 @@ import { toastFrontendError, toastFrontendSuccess, toastFrontendInfo } from "/co
 
 const PLUGIN = "chat_organizer";
 const CHAT_DRAG_TYPE = "application/x-chat-organizer-ctxid";
+const VISIBLE_ORDER_KEY = "chat_organizer.visible_order.v1";
 
 async function api(action, body = {}) {
   return await callJsonApi(`/plugins/${PLUGIN}/tree_handler`, { ...body, action });
@@ -114,6 +115,11 @@ export const store = createStore("chatOrganizer", {
       this.tree = await api("get_tree");
       this.tree.folders ||= [];
       this.tree.orphan_order ||= [];
+      this.tree.visible_order ||= [];
+      if (this.tree.visible_order.length === 0) {
+        const localOrder = this._loadLocalVisibleOrder();
+        if (localOrder.length > 0) this.tree.visible_order = localOrder;
+      }
       this._syncChatsStoreOrder();
       this._applyFilter();
     } catch (e) {
@@ -246,6 +252,24 @@ export const store = createStore("chatOrganizer", {
     return rows;
   },
 
+  _loadLocalVisibleOrder() {
+    try {
+      const raw = localStorage.getItem(VISIBLE_ORDER_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch (_e) {
+      return [];
+    }
+  },
+
+  _saveLocalVisibleOrder(ctxids) {
+    try {
+      localStorage.setItem(VISIBLE_ORDER_KEY, JSON.stringify((ctxids || []).filter(Boolean)));
+    } catch (_e) {
+      // localStorage unavailable/quota; backend persistence still attempted.
+    }
+  },
+
   _getTreeOrderedIds() {
     const ids = [];
     const pushFolder = (folder) => {
@@ -272,7 +296,7 @@ export const store = createStore("chatOrganizer", {
     const used = new Set();
     const ordered = [];
 
-    const visibleOrder = this.tree?.visible_order || [];
+    const visibleOrder = (this.tree?.visible_order?.length ? this.tree.visible_order : this._loadLocalVisibleOrder()) || [];
     if (visibleOrder.length > 0) {
       // Use the unified saved order
       for (const id of visibleOrder) {
@@ -733,6 +757,10 @@ export const store = createStore("chatOrganizer", {
 
     // Read the current visible DOM order of chats in the sidebar.
     const visibleIds = Array.from(list.querySelectorAll('.chat-container'))
+      .filter(el => {
+        const li = el.closest('li');
+        return el.offsetParent !== null && (!li || li.style.display !== 'none');
+      })
       .map(el => el.getAttribute('data-ctxid'))
       .filter(Boolean);
 
@@ -752,14 +780,28 @@ export const store = createStore("chatOrganizer", {
       ...withoutDragged.slice(targetIndex),
     ];
 
-    // Persist the unified order. Folder membership unchanged.
+    // Optimistically apply immediately so the row visibly moves even before
+    // backend persistence completes (or before Agent Zero has restarted with
+    // the latest backend handler). Folder membership unchanged.
+    this.tree ||= { folders: [], orphan_order: [], visible_order: [] };
+    this.tree.visible_order = newVisibleOrder;
+    this._saveLocalVisibleOrder(newVisibleOrder);
+    this._syncChatsStoreOrder();
+    this._applyFilter();
+
     try {
       await api("set_visible_order", { ctxids: newVisibleOrder });
+      // Reload server tree, but loadTree will preserve local fallback if the
+      // running backend is old and does not yet return visible_order.
       await this.loadTree();
       toastFrontendSuccess("Chats reordered", "Chat Organizer");
     } catch (e) {
-      console.error("ChatOrganizer: reorder failed", e);
-      toastFrontendError("Failed to reorder chats", "Chat Organizer");
+      console.warn("ChatOrganizer: server visible_order persistence failed; using local fallback until restart", e);
+      if (typeof toastFrontendInfo === 'function') {
+        toastFrontendInfo("Chats reordered locally. Restart Agent Zero to enable server-side persistence.", "Chat Organizer");
+      } else {
+        toastFrontendSuccess("Chats reordered", "Chat Organizer");
+      }
     }
   },
 

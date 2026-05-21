@@ -55,3 +55,7 @@ To keep behavior predictable and avoid accidental folder assignment:
 - Use the right-click chat menu to explicitly move a chat to any folder.
 - ESC cancels an in-progress drag.
 - Auto-scroll kicks in near the top/bottom edges of the sidebar while dragging.
+
+## Reorder Reliability Notes (v1.4.1)
+
+Reordering in All Chats now updates the visible sidebar order optimistically before backend persistence completes. The plugin also stores a local browser fallback (`localStorage`) so the row visibly moves immediately even if Agent Zero has not restarted yet with the newest backend API. Server-side persistence uses `visible_order` via `set_visible_order` after restart.
