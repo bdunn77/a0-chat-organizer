@@ -143,8 +143,17 @@ export const store = createStore("chatOrganizer", {
       const body = { name };
       if (parentId) body.parent_id = parentId;
       const res = await api("create_folder", body);
-      if (res?.folder?.id) this.expanded = { ...this.expanded, [parentId || res.folder.id]: true };
+      const newFolderId = res?.folder?.id || null;
+
+      // Reload first, then expand. Expanding before the fresh tree arrives can
+      // fail visually for the first child folder because the x-for rows have not
+      // been rebuilt yet. Expanding after loadTree guarantees the newly created
+      // subfolder is visible immediately.
       await this.loadTree();
+      if (parentId) this.expandFolderPath(parentId);
+      if (newFolderId) this.expanded = { ...this.expanded, [newFolderId]: true };
+      if (!parentId && newFolderId) this.expandFolderPath(newFolderId);
+
       toastFrontendSuccess("Folder created", "Chat Organizer");
     } catch (e) {
       console.error("ChatOrganizer: create folder failed", e);
@@ -208,6 +217,29 @@ export const store = createStore("chatOrganizer", {
   },
 
   isExpanded(id) { return !!this.expanded[id]; },
+
+  expandFolderPath(folderId) {
+    if (!folderId) return;
+    const path = [];
+    const findPath = (folders, targetId, acc = []) => {
+      for (const folder of folders || []) {
+        const next = [...acc, folder.id];
+        if (folder.id === targetId) return next;
+        const childPath = findPath(folder.children || [], targetId, next);
+        if (childPath) return childPath;
+      }
+      return null;
+    };
+    const found = findPath(this.tree?.folders || [], folderId, []);
+    if (found) {
+      for (const id of found) path.push(id);
+    } else {
+      path.push(folderId);
+    }
+    const nextExpanded = { ...this.expanded };
+    for (const id of path) nextExpanded[id] = true;
+    this.expanded = nextExpanded;
+  },
 
   toggleFolder(id) {
     this.expanded = { ...this.expanded, [id]: !this.expanded[id] };
