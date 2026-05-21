@@ -10,7 +10,7 @@ Organize your Agent Zero chats with unlimited nested folders while keeping the d
 - **Unfiled / All Chats** — quick filter buttons to show unfiled chats or all chats
 - **Drag chat to folder** — drag a chat from the default sidebar list onto any folder or Unfiled
 - **Right-click chat menu** — right-click any chat to move it to a folder, Unfiled, or remove it from its folder
-- **Drag reorder** — drag a chat above/below another chat to reorder within its folder or the Unfiled list
+- **Smooth drag reorder** — drag a chat above/below another chat using a custom pointer-drag interaction with a polished floating preview and insertion marker
 - **Cross-folder move by reorder** — drag a chat near a chat in another folder to move it into that folder and place it there
 - **Chat count badges** — each folder shows how many chats it contains, including nested folders
 - **Plugin-compatible** — does not replace the default `.chat-container` rows, so Chat Rename, Favorite Chats, Chat Status Marklet, and similar plugins continue working
@@ -37,7 +37,7 @@ usr/plugins/chat_organizer/
 
 - **Backend** — `tree_handler.py` persists folder data at `data/tree.json` and supports `get_tree`, `create_folder`, `rename_folder`, `delete_folder`, `move_chat`, `reorder`, and `set_orphan_order`.
 - **Frontend** — the `chatOrganizer` Alpine store renders the folder panel, attaches drag/drop and right-click listeners to the default chat rows, and filters/reorders `$store.chats.contexts` without replacing the default sidebar DOM.
-- **File-drop overlay guard** — internal chat drags use a plugin-specific drag type and suppress Agent Zero's file attachment overlay during chat-only drag operations.
+- **File-drop overlay guard** — chat moves/reorders use custom pointer events instead of native file-style dragging, so Agent Zero's file attachment overlay does not appear during chat-only drags.
 - **Compatibility** — default chat rows remain in the DOM, preserving other chat sidebar plugins.
 
 ## No dependencies

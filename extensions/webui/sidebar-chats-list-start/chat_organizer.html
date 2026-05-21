@@ -27,6 +27,7 @@
 
                   <template x-if="row.type === 'folder'">
                     <div class="co-folder-row"
+                         :data-folder-id="row.folder.id"
                          :class="{'co-active': $store.chatOrganizer.activeFilter === row.folder.id, 'co-drop-target': $store.chatOrganizer.dragOverFolderId === row.folder.id}"
                          :style="{ paddingLeft: (4 + row.depth * 16) + 'px' }"
                          @dragenter="$store.chatOrganizer.dragOverFolder($event, row.folder.id)"
@@ -54,6 +55,8 @@
 
                   <template x-if="row.type === 'orphans'">
                     <div class="co-filter-row"
+                         data-co-folder-drop="true"
+                         data-folder-id=""
                          :class="{'co-active': $store.chatOrganizer.activeFilter === '', 'co-drop-target': $store.chatOrganizer.dragOverFolderId === '__orphans__'}"
                          @click="$store.chatOrganizer.setFilter('')"
                          @dragenter="$store.chatOrganizer.dragOverFolder($event, '')"
@@ -264,10 +267,46 @@
     .co-menu-danger:hover { background: #7f1d1d; color: #ffffff !important; }
     .co-menu-divider { margin: 4px 0; border: none; border-top: 1px solid var(--co-border); }
 
-    .chats-config-list .chat-container.co-chat-draggable { cursor: grab; }
-    .chats-config-list .chat-container.co-chat-dragging { opacity: 0.55; }
-    .chats-config-list .chat-container.co-drop-before { border-top: 2px solid #60a5fa !important; }
-    .chats-config-list .chat-container.co-drop-after { border-bottom: 2px solid #60a5fa !important; }
+    .chats-config-list .chat-container.co-chat-draggable { cursor: grab; touch-action: none; }
+    .chats-config-list .chat-container.co-chat-dragging { opacity: 0.42; filter: saturate(0.8); }
+    .chat-organizer-root .co-pointer-drop-target {
+      background: rgba(37,99,235,0.30) !important;
+      border-color: var(--co-focus) !important;
+      box-shadow: inset 0 0 0 1px rgba(147,197,253,0.45), 0 0 0 2px rgba(37,99,235,0.18);
+      color: #ffffff !important;
+    }
+    .co-drag-ghost {
+      position: fixed;
+      left: 0;
+      top: 0;
+      z-index: 10000;
+      max-width: 260px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(147,197,253,0.65);
+      background: rgba(15,23,42,0.94);
+      color: #ffffff;
+      font-size: var(--font-size-small);
+      font-weight: 700;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      will-change: transform;
+    }
+    .co-insert-marker {
+      position: fixed;
+      z-index: 9999;
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, transparent 0, #93c5fd 10%, #60a5fa 50%, #93c5fd 90%, transparent 100%);
+      box-shadow: 0 0 0 1px rgba(15,23,42,0.75), 0 0 12px rgba(96,165,250,0.65);
+      pointer-events: none;
+      display: none;
+    }
+    body.co-chat-organizer-drag-active { user-select: none; cursor: grabbing !important; }
+    body.co-chat-organizer-drag-active .chats-config-list .chat-container { cursor: grabbing !important; }
   </style>
 </body>
 </html>

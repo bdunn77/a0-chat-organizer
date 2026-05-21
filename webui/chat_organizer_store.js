@@ -80,6 +80,10 @@ export const store = createStore("chatOrganizer", {
   dragOverFolderId: null,
   dragOverChatId: null,
   dragOverChatPosition: null,
+  pointerDrag: null,
+  dragGhost: null,
+  dropMarker: null,
+  suppressClickOnce: false,
   _attachmentOverlayPatched: false,
 
   init() {
@@ -98,6 +102,7 @@ export const store = createStore("chatOrganizer", {
     this.dragOverFolderId = null;
     this.dragOverChatId = null;
     this.dragOverChatPosition = null;
+    this._cleanupPointerDragUI();
     this._hideAttachmentOverlay();
     this._stopObserver();
     this._clearFilter();
@@ -351,62 +356,13 @@ export const store = createStore("chatOrganizer", {
       if (self._attachedChats.has(el)) return;
       self._attachedChats.add(el);
 
-      // Make default Agent Zero chat rows draggable as internal chat-organizer items.
-      el.setAttribute('draggable', 'true');
+      // Use custom pointer-drag instead of native HTML drag/drop. This avoids the
+      // Agent Zero file-drop overlay and gives us smoother, production-grade UX.
+      el.setAttribute('draggable', 'false');
       el.classList.add('co-chat-draggable');
 
-      el.addEventListener('dragstart', function(ev) {
-        const ctxid = el.getAttribute('data-ctxid');
-        if (!ctxid) return;
-        self.draggedCtxid = ctxid;
-        window.__chatOrganizerDraggingChat = true;
-        self._patchAttachmentOverlay();
-        self._hideAttachmentOverlay();
-        ev.dataTransfer.effectAllowed = 'move';
-        ev.dataTransfer.setData(CHAT_DRAG_TYPE, ctxid);
-        ev.dataTransfer.setData('text/plain', ctxid);
-        el.classList.add('co-chat-dragging');
-      });
-
-      el.addEventListener('dragend', function() {
-        self._clearDragState();
-      });
-
-      // Let chats be reordered by dropping above/below another visible chat.
-      el.addEventListener('dragenter', function(ev) {
-        if (!self._isInternalChatDrag(ev)) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-      });
-
-      el.addEventListener('dragover', function(ev) {
-        if (!self._isInternalChatDrag(ev)) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        ev.dataTransfer.dropEffect = 'move';
-        self._hideAttachmentOverlay();
-        const targetCtxid = el.getAttribute('data-ctxid');
-        if (!targetCtxid || targetCtxid === self.draggedCtxid) return;
-        const rect = el.getBoundingClientRect();
-        const pos = ev.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
-        self._setChatDropIndicator(el, targetCtxid, pos);
-      });
-
-      el.addEventListener('dragleave', function(ev) {
-        if (!self._isInternalChatDrag(ev)) return;
-        if (!el.contains(ev.relatedTarget)) self._clearChatDropIndicator(el);
-      });
-
-      el.addEventListener('drop', async function(ev) {
-        if (!self._isInternalChatDrag(ev)) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        const dragged = ev.dataTransfer.getData(CHAT_DRAG_TYPE) || ev.dataTransfer.getData('text/plain') || self.draggedCtxid;
-        const target = el.getAttribute('data-ctxid');
-        const position = self.dragOverChatPosition || 'before';
-        self._clearChatDropIndicators();
-        if (dragged && target && dragged !== target) await self.dropChatNearChat(dragged, target, position);
-        self._clearDragState();
+      el.addEventListener('pointerdown', function(ev) {
+        self._startPointerDrag(ev, el);
       });
 
       // Right-click context menu on chat.
@@ -424,7 +380,7 @@ export const store = createStore("chatOrganizer", {
   _removeChatInteractions() {
     const items = document.querySelectorAll('.chats-config-list .chat-container');
     items.forEach((el) => {
-      el.removeAttribute('draggable');
+      el.setAttribute('draggable', 'false');
       el.classList.remove('co-chat-draggable', 'co-chat-dragging', 'co-drop-before', 'co-drop-after');
     });
   },
@@ -487,6 +443,193 @@ export const store = createStore("chatOrganizer", {
     document.querySelectorAll('.co-drop-before, .co-drop-after').forEach(el => {
       el.classList.remove('co-drop-before', 'co-drop-after');
     });
+  },
+
+  // ── Smooth pointer-drag UX for moving/reordering chats ──
+  _startPointerDrag(ev, el) {
+    if (ev.button !== 0) return;
+    if (ev.target.closest('button, input, textarea, select, a, .dropdown, .co-context-menu')) return;
+    const ctxid = el.getAttribute('data-ctxid');
+    if (!ctxid) return;
+
+    this.pointerDrag = {
+      ctxid,
+      sourceEl: el,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      x: ev.clientX,
+      y: ev.clientY,
+      active: false,
+      targetCtxid: null,
+      targetPosition: null,
+      targetFolderId: null,
+    };
+
+    this._boundPointerMove = this._boundPointerMove || ((e) => this._onPointerMove(e));
+    this._boundPointerUp = this._boundPointerUp || ((e) => this._onPointerUp(e));
+    document.addEventListener('pointermove', this._boundPointerMove, true);
+    document.addEventListener('pointerup', this._boundPointerUp, true);
+    document.addEventListener('pointercancel', this._boundPointerUp, true);
+  },
+
+  _onPointerMove(ev) {
+    const drag = this.pointerDrag;
+    if (!drag) return;
+
+    const dx = ev.clientX - drag.startX;
+    const dy = ev.clientY - drag.startY;
+    if (!drag.active && Math.hypot(dx, dy) < 7) return;
+
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (!drag.active) this._beginPointerDrag(ev);
+
+    drag.x = ev.clientX;
+    drag.y = ev.clientY;
+    this._moveGhost(ev.clientX, ev.clientY);
+    this._updatePointerDropTarget(ev.clientX, ev.clientY);
+  },
+
+  async _onPointerUp(ev) {
+    const drag = this.pointerDrag;
+    if (!drag) return;
+
+    document.removeEventListener('pointermove', this._boundPointerMove, true);
+    document.removeEventListener('pointerup', this._boundPointerUp, true);
+    document.removeEventListener('pointercancel', this._boundPointerUp, true);
+
+    if (drag.active) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.suppressClickOnce = true;
+      setTimeout(() => { this.suppressClickOnce = false; }, 80);
+
+      if (drag.targetCtxid && drag.targetCtxid !== drag.ctxid) {
+        await this.dropChatNearChat(drag.ctxid, drag.targetCtxid, drag.targetPosition || 'before');
+      } else if (drag.targetFolderId !== null && drag.targetFolderId !== undefined) {
+        await this.moveChat(drag.ctxid, drag.targetFolderId || '');
+      }
+    }
+
+    this._cleanupPointerDragUI();
+  },
+
+  _beginPointerDrag(ev) {
+    const drag = this.pointerDrag;
+    if (!drag) return;
+    drag.active = true;
+    this.draggedCtxid = drag.ctxid;
+    window.__chatOrganizerDraggingChat = true;
+    this._patchAttachmentOverlay();
+    this._hideAttachmentOverlay();
+    drag.sourceEl.classList.add('co-chat-dragging');
+    document.body.classList.add('co-chat-organizer-drag-active');
+    this._ensureGhost(this._getChatTitle(drag.ctxid));
+    this._moveGhost(ev.clientX, ev.clientY);
+  },
+
+  _updatePointerDropTarget(x, y) {
+    const drag = this.pointerDrag;
+    if (!drag?.active) return;
+
+    const ghost = this.dragGhost;
+    const marker = this.dropMarker;
+    if (ghost) ghost.style.pointerEvents = 'none';
+    if (marker) marker.style.pointerEvents = 'none';
+
+    const el = document.elementFromPoint(x, y);
+    this._clearFolderPointerTargets();
+    this._hideDropMarker();
+    drag.targetCtxid = null;
+    drag.targetPosition = null;
+    drag.targetFolderId = null;
+
+    const folderEl = el?.closest?.('.chat-organizer-root .co-folder-row, .chat-organizer-root .co-filter-row[data-co-folder-drop="true"]');
+    if (folderEl) {
+      const folderId = folderEl.getAttribute('data-folder-id') || '';
+      drag.targetFolderId = folderId;
+      folderEl.classList.add('co-pointer-drop-target');
+      return;
+    }
+
+    const chatEl = el?.closest?.('.chats-config-list .chat-container');
+    if (chatEl) {
+      const targetCtxid = chatEl.getAttribute('data-ctxid');
+      if (targetCtxid && targetCtxid !== drag.ctxid) {
+        const rect = chatEl.getBoundingClientRect();
+        const position = y < rect.top + rect.height / 2 ? 'before' : 'after';
+        drag.targetCtxid = targetCtxid;
+        drag.targetPosition = position;
+        this._showDropMarker(rect, position);
+      }
+    }
+  },
+
+  _getChatTitle(ctxid) {
+    const ctx = this.getAllChats().find(c => c.id === ctxid);
+    if (!ctx) return 'Moving chat';
+    return ctx.name || `Chat #${ctx.no || ''}`.trim();
+  },
+
+  _ensureGhost(text) {
+    if (!this.dragGhost) {
+      this.dragGhost = document.createElement('div');
+      this.dragGhost.className = 'co-drag-ghost';
+      document.body.appendChild(this.dragGhost);
+    }
+    this.dragGhost.textContent = text;
+  },
+
+  _moveGhost(x, y) {
+    if (!this.dragGhost) return;
+    this.dragGhost.style.transform = `translate3d(${x + 14}px, ${y + 12}px, 0)`;
+  },
+
+  _ensureDropMarker() {
+    if (!this.dropMarker) {
+      this.dropMarker = document.createElement('div');
+      this.dropMarker.className = 'co-insert-marker';
+      document.body.appendChild(this.dropMarker);
+    }
+  },
+
+  _showDropMarker(rect, position) {
+    this._ensureDropMarker();
+    const y = position === 'before' ? rect.top : rect.bottom;
+    this.dropMarker.style.display = 'block';
+    this.dropMarker.style.left = `${rect.left + 8}px`;
+    this.dropMarker.style.top = `${y - 2}px`;
+    this.dropMarker.style.width = `${Math.max(32, rect.width - 16)}px`;
+  },
+
+  _hideDropMarker() {
+    if (this.dropMarker) this.dropMarker.style.display = 'none';
+  },
+
+  _clearFolderPointerTargets() {
+    document.querySelectorAll('.co-pointer-drop-target').forEach(el => el.classList.remove('co-pointer-drop-target'));
+  },
+
+  _cleanupPointerDragUI() {
+    window.__chatOrganizerDraggingChat = false;
+    this.pointerDrag = null;
+    this.draggedCtxid = null;
+    this.dragOverFolderId = null;
+    this.dragOverChatId = null;
+    this.dragOverChatPosition = null;
+    this._clearChatDropIndicators();
+    this._clearFolderPointerTargets();
+    this._hideDropMarker();
+    document.querySelectorAll('.co-chat-dragging').forEach(el => el.classList.remove('co-chat-dragging'));
+    document.body.classList.remove('co-chat-organizer-drag-active');
+    if (this.dragGhost) {
+      this.dragGhost.remove();
+      this.dragGhost = null;
+    }
+    if (this.dropMarker) {
+      this.dropMarker.remove();
+      this.dropMarker = null;
+    }
   },
 
   // ── Chat context menu ──
