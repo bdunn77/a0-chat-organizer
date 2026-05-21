@@ -85,6 +85,7 @@ export const store = createStore("chatOrganizer", {
   dragGhost: null,
   dropMarker: null,
   suppressClickOnce: false,
+  _active: false,
   _attachmentOverlayPatched: false,
 
   init() {
@@ -92,18 +93,20 @@ export const store = createStore("chatOrganizer", {
   },
 
   onOpen() {
+    this._active = true;
     this.loadTree();
     this._startObserver();
   },
 
   cleanup() {
+    this._active = false;
     this.contextMenu = null;
     this.chatContextMenu = null;
     this.draggedCtxid = null;
     this.dragOverFolderId = null;
     this.dragOverChatId = null;
     this.dragOverChatPosition = null;
-    this._cleanupPointerDragUI();
+    this._abortPointerDrag();
     this._hideAttachmentOverlay();
     this._stopObserver();
     this._clearFilter();
@@ -434,11 +437,23 @@ export const store = createStore("chatOrganizer", {
       el.classList.add('co-chat-draggable');
 
       el.addEventListener('pointerdown', function(ev) {
+        if (!self._active) return;
         self._startPointerDrag(ev, el);
       });
 
+      // Prevent the synthetic click after a drag from selecting/opening the wrong chat.
+      el.addEventListener('click', function(ev) {
+        if (!self._active) return;
+        if (self.suppressClickOnce) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+        }
+      }, true);
+
       // Right-click context menu on chat.
       el.addEventListener('contextmenu', function(ev) {
+        if (!self._active) return;
         const ctxid = el.getAttribute('data-ctxid');
         if (ctxid) {
           ev.preventDefault();
@@ -755,17 +770,23 @@ export const store = createStore("chatOrganizer", {
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
 
-    // Read the current visible DOM order of chats in the sidebar.
-    const visibleIds = Array.from(list.querySelectorAll('.chat-container'))
-      .filter(el => {
-        const li = el.closest('li');
-        return el.offsetParent !== null && (!li || li.style.display !== 'none');
-      })
-      .map(el => el.getAttribute('data-ctxid'))
-      .filter(Boolean);
+    // Read the full current sidebar order from the Alpine chats store, not just
+    // visible DOM rows. This preserves hidden rows when reordering inside a
+    // folder/Unfiled filtered view and prevents incomplete visible_order saves.
+    const targetEl = Array.from(list.querySelectorAll('.chat-container'))
+      .find(el => el.getAttribute('data-ctxid') === targetCtxid);
+    const targetLi = targetEl?.closest('li');
+    if (!targetEl || targetEl.offsetParent === null || targetLi?.style.display === 'none') {
+      if (typeof toastFrontendInfo === 'function') {
+        toastFrontendInfo("Drop target not visible, nothing reordered.", "Chat Organizer");
+      }
+      return;
+    }
 
-    // Remove dragged from current visible order, then re-insert at drop point.
-    const withoutDragged = visibleIds.filter(id => id !== draggedCtxid);
+    const allIds = this.getAllChats().map(ctx => ctx.id).filter(Boolean);
+
+    // Remove dragged from current full order, then re-insert at drop point.
+    const withoutDragged = allIds.filter(id => id !== draggedCtxid);
     let targetIndex = withoutDragged.indexOf(targetCtxid);
     if (targetIndex < 0) {
       if (typeof toastFrontendInfo === 'function') {
@@ -791,8 +812,8 @@ export const store = createStore("chatOrganizer", {
 
     try {
       await api("set_visible_order", { ctxids: newVisibleOrder });
-      // Reload server tree, but loadTree will preserve local fallback if the
-      // running backend is old and does not yet return visible_order.
+      // Reload server tree; loadTree preserves local fallback if the running
+      // backend is old and does not yet return visible_order.
       await this.loadTree();
       toastFrontendSuccess("Chats reordered", "Chat Organizer");
     } catch (e) {

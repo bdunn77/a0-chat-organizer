@@ -59,3 +59,7 @@ To keep behavior predictable and avoid accidental folder assignment:
 ## Reorder Reliability Notes (v1.4.1)
 
 Reordering in All Chats now updates the visible sidebar order optimistically before backend persistence completes. The plugin also stores a local browser fallback (`localStorage`) so the row visibly moves immediately even if Agent Zero has not restarted yet with the newest backend API. Server-side persistence uses `visible_order` via `set_visible_order` after restart.
+
+## Production Notes (v1.4.2)
+
+The unified `visible_order` also projects back into each folder's `chat_ids` and the Unfiled `orphan_order`, so filtered folder views, Unfiled view, and All Chats view remain consistent after mixed sidebar reordering. Pointer-drag cleanup aborts safely on plugin unmount, pointer cancel, or ESC.

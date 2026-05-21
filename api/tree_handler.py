@@ -251,13 +251,56 @@ class TreeHandler(ApiHandler):
 
 
     def _set_visible_order(self, input: Input) -> Output:
-        """Persist the unified sidebar order (all chats, mixed folder + unfiled)."""
+        """Persist the unified sidebar order and keep per-container orders coherent.
+
+        The unified visible_order controls the full mixed sidebar order. We also
+        project that order back into each folder's chat_ids and orphan_order so
+        filtered folder/Unfiled views remain consistent with the same drag order.
+        Folder membership is not changed here.
+        """
         ctxids = input.get("ctxids")
         if not isinstance(ctxids, list):
             return Response("ctxids must be a list", 400)
 
         tree = _load_tree()
-        tree["visible_order"] = [str(c) for c in ctxids if c]
+        visible_order = [str(c) for c in ctxids if c]
+        tree["visible_order"] = visible_order
+        rank = {ctxid: i for i, ctxid in enumerate(visible_order)}
+
+        def order_key(ctxid: str, fallback_index: int) -> tuple[int, int]:
+            # Unknown/new chats keep their relative position after known ordered chats.
+            return (rank.get(ctxid, len(rank) + fallback_index), fallback_index)
+
+        def sort_folder(folder: dict) -> None:
+            chat_ids = [str(c) for c in folder.get("chat_ids", []) if c]
+            folder["chat_ids"] = [
+                ctxid for _idx, ctxid in sorted(enumerate(chat_ids), key=lambda item: order_key(item[1], item[0]))
+            ]
+            for child in folder.get("children", []):
+                sort_folder(child)
+
+        assigned_ids: set[str] = set()
+        for folder in tree.get("folders", []):
+            sort_folder(folder)
+            assigned_ids.update(_collect_all_chat_ids(folder))
+
+        # Derive Unfiled order from visible_order for every visible chat that is
+        # not assigned to a folder, then append any previously known orphan IDs
+        # not present in visible_order. This keeps the Unfiled filtered view
+        # coherent even for chats that were never explicitly moved into/out of a
+        # folder before the first unified reorder.
+        orphan_ids: list[str] = []
+        seen_orphans: set[str] = set()
+        for ctxid in visible_order:
+            if ctxid not in assigned_ids and ctxid not in seen_orphans:
+                orphan_ids.append(ctxid)
+                seen_orphans.add(ctxid)
+        for ctxid in [str(c) for c in tree.get("orphan_order", []) if c]:
+            if ctxid not in seen_orphans:
+                orphan_ids.append(ctxid)
+                seen_orphans.add(ctxid)
+        tree["orphan_order"] = orphan_ids
+
         _save_tree(tree)
         return {"ok": True}
 
