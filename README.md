@@ -14,6 +14,7 @@ Organize your Agent Zero chats with unlimited nested folders while keeping the d
 - **Cross-folder move by reorder** — drag a chat near a chat in another folder to move it into that folder and place it there
 - **Chat count badges** — each folder shows how many chats it contains, including nested folders
 - **Plugin-compatible** — does not replace the default `.chat-container` rows, so Chat Rename, Favorite Chats, Chat Status Marklet, and similar plugins continue working
+- **High-contrast UI** — folder rows, filter rows, badges, menus, active states, and rename inputs use scoped theme-safe colors so text stays readable across dark/light/custom themes
 
 ## Architecture
 

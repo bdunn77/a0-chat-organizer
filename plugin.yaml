@@ -1,7 +1,7 @@
 name: chat_organizer
 title: Chat Organizer
 description: Organize chats with nested folders, filter the default sidebar, drag chats into folders, right-click to move, and reorder chats by dragging above/below other chats.
-version: 1.1.0
+version: 1.1.1
 settings_sections: []
 per_project_config: false
 per_agent_config: false
