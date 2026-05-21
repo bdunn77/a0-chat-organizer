@@ -320,22 +320,36 @@ export const store = createStore("chatOrganizer", {
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
     const items = list.querySelectorAll('.chat-container');
+    // "All Chats" view: show everything (clear styles on both li wrappers and chat-containers).
     if (!this.activeFilter && this.activeFilter !== "") {
-      items.forEach(el => el.style.display = '');
+      items.forEach(el => {
+        el.style.display = '';
+        const li = el.closest('li');
+        if (li) li.style.display = '';
+      });
       return;
     }
+    // Filtered view (specific folder or Unfiled): hide non-matching items by their
+    // parent <li> wrapper so hidden rows do not leave empty space in the sidebar.
     const folder = this.activeFilter ? findFolder(this.activeFilter, this.tree?.folders || []) : null;
     const visibleIds = folder ? new Set(folder.chat_ids || []) : new Set(this.getOrphanIds());
     items.forEach(el => {
       const ctxid = el.getAttribute('data-ctxid');
-      el.style.display = visibleIds.has(ctxid) ? '' : 'none';
+      const visible = visibleIds.has(ctxid);
+      el.style.display = visible ? '' : 'none';
+      const li = el.closest('li');
+      if (li) li.style.display = visible ? '' : 'none';
     });
   },
 
   _clearFilter() {
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
-    list.querySelectorAll('.chat-container').forEach(el => el.style.display = '');
+    list.querySelectorAll('.chat-container').forEach(el => {
+      el.style.display = '';
+      const li = el.closest('li');
+      if (li) li.style.display = '';
+    });
   },
 
   // ── Observer + Chat interaction attachment ──
