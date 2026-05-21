@@ -11,13 +11,10 @@
            @click.outside="$store.chatOrganizer.closeContextMenu()">
 
         <div class="co-header">
-          <h3 class="section-header">Chat Folders</h3>
+          <span class="section-header">Folders</span>
           <div class="co-header-actions">
-            <button class="btn-icon-action co-action-btn" @click="$store.chatOrganizer.showCreateFolder(null)" aria-label="New Folder" title="New Folder">
+            <button class="btn-icon-action co-action-btn" @click="$store.chatOrganizer.showCreateFolder(null)" title="New Folder">
               <span class="material-symbols-outlined">create_new_folder</span>
-            </button>
-            <button class="btn-icon-action co-action-btn" @click="$store.chatOrganizer.newChat()" aria-label="New Chat" title="New Chat">
-              <span class="material-symbols-outlined">chat_add_on</span>
             </button>
           </div>
         </div>
@@ -27,9 +24,10 @@
             <div>
               <template x-for="row in $store.chatOrganizer.getRows()" :key="row.key">
                 <div>
+
                   <template x-if="row.type === 'folder'">
                     <div class="co-folder-row"
-                         :class="{'co-drop-target': $store.chatOrganizer.dragOverFolderId === row.folder.id}"
+                         :class="{'co-active': $store.chatOrganizer.activeFilter === row.folder.id, 'co-drop-target': $store.chatOrganizer.dragOverFolderId === row.folder.id}"
                          :style="{ paddingLeft: (4 + row.depth * 16) + 'px' }"
                          @dragover="$store.chatOrganizer.dragOverFolder($event, row.folder.id)"
                          @dragleave="$store.chatOrganizer.dragLeaveFolder($event, row.folder.id)"
@@ -38,13 +36,13 @@
                         <span class="material-symbols-outlined co-toggle-icon" x-text="$store.chatOrganizer.isExpanded(row.folder.id) ? 'folder_open' : 'folder'"></span>
                       </button>
                       <template x-if="$store.chatOrganizer.isEditing(row.folder.id)">
-                        <input :id="'rename-input-'+row.folder.id" class="co-rename-input" x-model="$store.chatOrganizer.editValue"
+                        <input :id="'co-rename-' + row.folder.id" class="co-rename-input" x-model="$store.chatOrganizer.editValue"
                                @keydown.enter="$store.chatOrganizer.finishRename(row.folder.id)"
                                @keydown.escape="$store.chatOrganizer.cancelRename()"
                                @blur="$store.chatOrganizer.finishRename(row.folder.id)">
                       </template>
                       <template x-if="!$store.chatOrganizer.isEditing(row.folder.id)">
-                        <span class="co-folder-name" @contextmenu="$store.chatOrganizer.openContextMenu($event, row.folder.id)" x-text="row.folder.name"></span>
+                        <span class="co-folder-name" @click="$store.chatOrganizer.setFilter(row.folder.id)" @contextmenu="$store.chatOrganizer.openContextMenu($event, row.folder.id)" x-text="row.folder.name"></span>
                       </template>
                       <span class="co-badge" x-text="$store.chatOrganizer.folderTotalChats(row.folder)"></span>
                       <button class="btn-icon-action co-menu-btn" @click.stop="$store.chatOrganizer.openContextMenu($event, row.folder.id)">
@@ -53,37 +51,28 @@
                     </div>
                   </template>
 
-                  <template x-if="row.type === 'chat'">
-                    <div class="co-chat-item"
-                         :class="{'co-chat-selected': $store.chatOrganizer.isSelected(row.ctx.id), 'co-drop-before': $store.chatOrganizer.dragOverChatId === row.ctx.id}"
-                         :style="{ paddingLeft: (10 + row.depth * 16) + 'px' }"
-                         draggable="true"
-                         @dragstart="$store.chatOrganizer.dragStartChat($event, row.ctx.id)"
-                         @dragover="$store.chatOrganizer.dragOverChat($event, row.ctx.id)"
-                         @drop="$store.chatOrganizer.dropBeforeChat($event, row.ctx.id, row.folderId)"
-                         @click="$store.chatOrganizer.selectChat(row.ctx.id)">
-                      <span class="project-color-ball" :style="row.ctx.project?.color ? {backgroundColor: row.ctx.project.color} : {border: '1px solid var(--color-border)'}"></span>
-                      <span class="co-chat-name" x-text="row.ctx.name || 'Chat #' + row.ctx.no"></span>
-                      <button class="btn-icon-action co-kill-btn" title="Close chat" @click.stop="$confirmClick($event, () => $store.chatOrganizer.killChat(row.ctx.id))">
-                        <span class="material-symbols-outlined">close</span>
-                      </button>
-                    </div>
-                  </template>
-
-                  <template x-if="row.type === 'empty'">
-                    <div class="co-empty" :style="{ paddingLeft: (10 + row.depth * 16) + 'px' }"><i>Empty folder</i></div>
-                  </template>
-
-                  <template x-if="row.type === 'orphansHeader'">
-                    <div class="co-orphans-header"
+                  <template x-if="row.type === 'orphans'">
+                    <div class="co-filter-row"
+                         :class="{'co-active': $store.chatOrganizer.activeFilter === ''}"
+                         @click="$store.chatOrganizer.setFilter('')"
                          @dragover="$store.chatOrganizer.dragOverFolder($event, '')"
                          @dragleave="$store.chatOrganizer.dragLeaveFolder($event, '')"
-                         @drop="$store.chatOrganizer.dropOnFolder($event, '')"
-                         :class="{'co-drop-target': $store.chatOrganizer.dragOverFolderId === '__orphans__'}">
-                      <span class="co-orphans-label">Unfiled</span>
+                         @drop="$store.chatOrganizer.dropOnFolder($event, '')">
+                      <span class="material-symbols-outlined co-toggle-icon">inbox</span>
+                      <span class="co-folder-name">Unfiled</span>
                       <span class="co-badge" x-text="row.count"></span>
                     </div>
                   </template>
+
+                  <template x-if="row.type === 'all'">
+                    <div class="co-filter-row"
+                         :class="{'co-active': $store.chatOrganizer.activeFilter === null}"
+                         @click="$store.chatOrganizer.clearFilter()">
+                      <span class="material-symbols-outlined co-toggle-icon">forum</span>
+                      <span class="co-folder-name">All Chats</span>
+                    </div>
+                  </template>
+
                 </div>
               </template>
             </div>
@@ -109,40 +98,35 @@
   </div>
 
   <style>
-    /* Compatibility: do NOT hide the default chat list or header.
-       Chat Rename, Favorite Chats, and Chat Status Marklet enhance the core
-       .chats-config-list/.chat-container DOM. Keeping it visible ensures this
-       plugin does not disable or replace other chat-related plugins. */
-    .chat-organizer-root { display: flex; flex-direction: column; flex: 0 0 auto; max-height: 45%; min-height: 120px; margin-bottom: var(--spacing-sm); border-bottom: 1px solid var(--color-border); padding-bottom: var(--spacing-xs); }
-    .co-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; margin-bottom: var(--spacing-xs); }
-    .co-header .section-header { margin: 0; }
+    /* Chat Organizer: folder navigation panel that FILTERS the default chat list.
+       Does NOT hide or replace the default .chat-container elements.
+       This preserves compatibility with Chat Rename, Favorite Chats,
+       Chat Status Marklet, and any other sidebar-enhancing plugins. */
+    .chat-organizer-root { display: flex; flex-direction: column; flex: 0 0 auto; max-height: 35%; min-height: 80px; margin-bottom: var(--spacing-xs); border-bottom: 1px solid var(--color-border); padding-bottom: var(--spacing-xs); }
+    .co-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; margin-bottom: 2px; }
+    .co-header .section-header { margin: 0; font-size: var(--font-size-small); }
     .co-header-actions { display: flex; gap: 2px; }
     .co-action-btn { padding: 2px; }
-    .co-action-btn .material-symbols-outlined { font-size: 18px; }
+    .co-action-btn .material-symbols-outlined { font-size: 16px; }
     .co-tree-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
-    .co-folder-row { display: flex; align-items: center; gap: 2px; padding: 2px 4px; border-radius: 4px; cursor: pointer; min-height: 28px; user-select: none; }
-    .co-folder-row:hover, .co-chat-item:hover { background-color: var(--color-background-hover); }
+    .co-folder-row { display: flex; align-items: center; gap: 2px; padding: 2px 4px; border-radius: 4px; cursor: pointer; min-height: 26px; user-select: none; }
+    .co-folder-row:hover { background-color: var(--color-background-hover); }
+    .co-folder-row.co-active { background-color: var(--color-primary); color: white; border-radius: 4px; }
+    .co-folder-row.co-active .co-badge { background: rgba(255,255,255,0.3); color: white; }
+    .co-folder-row.co-active .co-toggle-icon { color: white; }
     .co-toggle { background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; }
-    .co-toggle-icon { font-size: 18px; color: var(--color-secondary); }
-    .co-folder-name { flex: 1; font-size: var(--font-size-small); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .co-badge { font-size: 10px; background: var(--color-border); color: var(--color-text); border-radius: 8px; padding: 0 5px; flex-shrink: 0; opacity: 0.7; }
+    .co-toggle-icon { font-size: 16px; color: var(--color-secondary); }
+    .co-folder-name { flex: 1; font-size: var(--font-size-small); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+    .co-badge { font-size: 9px; background: var(--color-border); color: var(--color-text); border-radius: 8px; padding: 0 4px; flex-shrink: 0; opacity: 0.7; line-height: 14px; }
     .co-menu-btn { opacity: 0; flex-shrink: 0; }
     .device-pointer .co-folder-row:hover .co-menu-btn { opacity: 1; }
     .device-touch .co-menu-btn { opacity: 1; }
     .co-drop-target { outline: 2px dashed var(--color-primary) !important; }
-    .co-drop-before { border-top: 2px solid var(--color-primary); }
-    .co-chat-item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; cursor: pointer; min-height: 28px; font-size: var(--font-size-small); }
-    .co-chat-selected { background-color: var(--color-background-hover); }
-    .co-chat-selected .co-chat-name { font-weight: bold; }
-    .co-chat-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .co-kill-btn { flex-shrink: 0; opacity: 0; margin-left: auto; }
-    .device-pointer .co-chat-item:hover .co-kill-btn { opacity: 1; }
-    .device-touch .co-kill-btn { opacity: 1; }
-    .co-kill-btn .material-symbols-outlined { font-size: 16px; }
-    .project-color-ball { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-    .co-empty { color: var(--color-secondary); font-size: var(--font-size-small); padding: 4px 6px; opacity: 0.6; }
-    .co-orphans-header { display: flex; align-items: center; gap: 6px; padding: 6px 4px 2px 4px; margin-top: var(--spacing-sm); border-top: 1px solid var(--color-border); }
-    .co-orphans-label { font-size: var(--font-size-small); font-weight: 600; opacity: 0.6; }
+    .co-filter-row { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border-radius: 4px; cursor: pointer; min-height: 26px; font-size: var(--font-size-small); opacity: 0.7; }
+    .co-filter-row:hover { background-color: var(--color-background-hover); opacity: 1; }
+    .co-filter-row.co-active { background-color: var(--color-primary); color: white; border-radius: 4px; opacity: 1; }
+    .co-filter-row.co-active .co-badge { background: rgba(255,255,255,0.3); color: white; }
+    .co-filter-row.co-active .co-toggle-icon { color: white; }
     .co-rename-input { flex: 1; font-size: var(--font-size-small); background: var(--color-input-bg); border: 1px solid var(--color-primary); border-radius: 3px; padding: 2px 4px; color: var(--color-text); }
     .co-context-menu { background: var(--color-panel); border: 1px solid var(--color-border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); padding: 4px 0; min-width: 160px; z-index: 1010; }
     .co-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px; border: none; background: none; color: var(--color-text); font-size: var(--font-size-small); cursor: pointer; text-align: left; }

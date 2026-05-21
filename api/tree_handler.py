@@ -113,7 +113,10 @@ class TreeHandler(ApiHandler):
         if not name:
             return Response("Folder name is required", 400)
 
-        parent_id = str(input.get("parent_id", "")).strip() or None
+        raw_pid = input.get("parent_id")
+        parent_id = str(raw_pid).strip() if raw_pid is not None else None
+        if parent_id == "":
+            parent_id = None
         tree = _load_tree()
 
         new_folder: dict[str, Any] = {

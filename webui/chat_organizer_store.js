@@ -1,6 +1,6 @@
 import { createStore } from "/js/AlpineStore.js";
 import { callJsonApi } from "/js/api.js";
-import { justToast } from "/index.js";
+import { toastFrontendError, toastFrontendSuccess } from "/components/notifications/notification-store.js";
 
 const PLUGIN = "chat_organizer";
 
@@ -44,13 +44,11 @@ function collectAssignedIds(folders, out = new Set()) {
 
 export const store = createStore("chatOrganizer", {
   tree: null,
-  draggedCtxid: null,
-  dragOverFolderId: null,
-  dragOverChatId: null,
   contextMenu: null,
   editingId: null,
   editValue: "",
   expanded: {},
+  activeFilter: null, // null = show all, "" = unfiled, folderId = that folder
 
   init() {
     if (!this.tree) this.loadTree();
@@ -58,13 +56,13 @@ export const store = createStore("chatOrganizer", {
 
   onOpen() {
     this.loadTree();
+    this._startObserver();
   },
 
   cleanup() {
     this.contextMenu = null;
-    this.draggedCtxid = null;
-    this.dragOverFolderId = null;
-    this.dragOverChatId = null;
+    this._stopObserver();
+    this._clearFilter();
   },
 
   async loadTree() {
@@ -72,22 +70,25 @@ export const store = createStore("chatOrganizer", {
       this.tree = await api("get_tree");
       this.tree.folders ||= [];
       this.tree.orphan_order ||= [];
+      this._applyFilter();
     } catch (e) {
       console.error("ChatOrganizer: failed to load tree", e);
-      justToast("Failed to load folder tree", "error", 3000, "chat-organizer");
+      toastFrontendError("Failed to load folder tree", "Chat Organizer");
       this.tree = { folders: [], orphan_order: [] };
     }
   },
 
   async createFolder(name, parentId = null) {
     try {
-      const res = await api("create_folder", { name, parent_id: parentId });
+      const body = { name };
+      if (parentId) body.parent_id = parentId;
+      const res = await api("create_folder", body);
       if (res?.folder?.id) this.expanded = { ...this.expanded, [parentId || res.folder.id]: true };
       await this.loadTree();
-      justToast("Folder created", "success", 1500, "chat-organizer");
+      toastFrontendSuccess("Folder created", "Chat Organizer");
     } catch (e) {
       console.error("ChatOrganizer: create folder failed", e);
-      justToast("Failed to create folder", "error", 3000, "chat-organizer");
+      toastFrontendError("Failed to create folder", "Chat Organizer");
     }
   },
 
@@ -95,10 +96,10 @@ export const store = createStore("chatOrganizer", {
     try {
       await api("rename_folder", { folder_id: folderId, name });
       await this.loadTree();
-      justToast("Folder renamed", "success", 1500, "chat-organizer");
+      toastFrontendSuccess("Folder renamed", "Chat Organizer");
     } catch (e) {
       console.error("ChatOrganizer: rename failed", e);
-      justToast("Failed to rename folder", "error", 3000, "chat-organizer");
+      toastFrontendError("Failed to rename folder", "Chat Organizer");
     }
   },
 
@@ -106,10 +107,11 @@ export const store = createStore("chatOrganizer", {
     try {
       await api("delete_folder", { folder_id: folderId });
       await this.loadTree();
-      justToast("Folder deleted", "success", 1500, "chat-organizer");
+      if (this.activeFilter === folderId) this.activeFilter = null;
+      toastFrontendSuccess("Folder deleted", "Chat Organizer");
     } catch (e) {
       console.error("ChatOrganizer: delete failed", e);
-      justToast("Failed to delete folder", "error", 3000, "chat-organizer");
+      toastFrontendError("Failed to delete folder", "Chat Organizer");
     }
   },
 
@@ -119,7 +121,7 @@ export const store = createStore("chatOrganizer", {
       await this.loadTree();
     } catch (e) {
       console.error("ChatOrganizer: move chat failed", e);
-      justToast("Failed to move chat", "error", 3000, "chat-organizer");
+      toastFrontendError("Failed to move chat", "Chat Organizer");
     }
   },
 
@@ -132,7 +134,6 @@ export const store = createStore("chatOrganizer", {
   folderTotalChats(folder) { return countTotalChats(folder); },
 
   getChatsStore() { return window.Alpine?.store("chats"); },
-
   getAllChats() { return this.getChatsStore()?.contexts || []; },
 
   getFolderChats(folder) {
@@ -141,92 +142,92 @@ export const store = createStore("chatOrganizer", {
     return ids.map(id => chats.find(c => c.id === id)).filter(Boolean);
   },
 
-  getOrphanChats() {
-    const chats = this.getAllChats();
+  getOrphanIds() {
     const assigned = collectAssignedIds(this.tree?.folders || []);
-    const orphans = chats.filter(c => !assigned.has(c.id));
-    const byId = new Map(orphans.map(c => [c.id, c]));
-    const ordered = [];
-    for (const id of this.tree?.orphan_order || []) {
-      if (byId.has(id)) {
-        ordered.push(byId.get(id));
-        byId.delete(id);
-      }
-    }
-    return [...ordered, ...Array.from(byId.values())];
+    return this.getAllChats().filter(c => !assigned.has(c.id)).map(c => c.id);
   },
 
+  // Build flat rows for rendering the folder tree (folders only, no chat items)
   getRows() {
     const rows = [];
     const pushFolder = (folder, depth) => {
       rows.push({ key: `folder:${folder.id}`, type: "folder", folder, depth });
       if (this.isExpanded(folder.id)) {
-        for (const ctx of this.getFolderChats(folder)) {
-          rows.push({ key: `chat:${folder.id}:${ctx.id}`, type: "chat", ctx, folderId: folder.id, depth: depth + 1 });
-        }
         for (const child of folder.children || []) pushFolder(child, depth + 1);
-        if ((folder.chat_ids || []).length === 0 && (folder.children || []).length === 0) {
-          rows.push({ key: `empty:${folder.id}`, type: "empty", depth: depth + 1 });
-        }
       }
     };
     for (const folder of this.tree?.folders || []) pushFolder(folder, 0);
-    const orphans = this.getOrphanChats();
-    if (orphans.length > 0) rows.push({ key: "orphans-header", type: "orphansHeader", count: orphans.length, depth: 0 });
-    for (const ctx of orphans) rows.push({ key: `chat:orphans:${ctx.id}`, type: "chat", ctx, folderId: "", depth: 0, orphan: true });
+    const orphanCount = this.getOrphanIds().length;
+    rows.push({ key: "orphans-row", type: "orphans", count: orphanCount, depth: 0 });
+    rows.push({ key: "all-chats-row", type: "all", depth: 0 });
     return rows;
   },
 
-  dragStartChat(ev, ctxid) {
-    ev.dataTransfer.effectAllowed = "move";
-    ev.dataTransfer.setData("text/plain", ctxid);
-    this.draggedCtxid = ctxid;
+  // Filtering: show/hide default chat-container elements
+  setFilter(folderId) {
+    this.activeFilter = folderId;
+    this._applyFilter();
   },
 
-  dragOverFolder(ev, folderId) {
-    ev.preventDefault();
-    ev.dataTransfer.dropEffect = "move";
-    this.dragOverFolderId = folderId || "__orphans__";
+  clearFilter() {
+    this.activeFilter = null;
+    this._applyFilter();
   },
 
-  dragLeaveFolder(_ev, folderId) {
-    if (this.dragOverFolderId === (folderId || "__orphans__")) this.dragOverFolderId = null;
-  },
-
-  dropOnFolder(ev, folderId = "") {
-    ev.preventDefault();
-    const ctxid = ev.dataTransfer.getData("text/plain") || this.draggedCtxid;
-    this.dragOverFolderId = null;
-    this.dragOverChatId = null;
-    if (ctxid) this.moveChat(ctxid, folderId || "", null);
-    this.draggedCtxid = null;
-  },
-
-  dragOverChat(ev, ctxid) {
-    ev.preventDefault();
-    ev.dataTransfer.dropEffect = "move";
-    this.dragOverChatId = ctxid;
-  },
-
-  async dropBeforeChat(ev, targetCtxid, folderId = "") {
-    ev.preventDefault();
-    const ctxid = ev.dataTransfer.getData("text/plain") || this.draggedCtxid;
-    this.dragOverFolderId = null;
-    this.dragOverChatId = null;
-    this.draggedCtxid = null;
-    if (!ctxid || ctxid === targetCtxid) return;
-
-    let ids;
-    if (folderId) {
-      const folder = findFolder(folderId, this.tree?.folders || []);
-      ids = (folder?.chat_ids || []).filter(id => id !== ctxid);
-    } else {
-      ids = this.getOrphanChats().map(c => c.id).filter(id => id !== ctxid);
+  _applyFilter() {
+    const list = document.querySelector('.chats-config-list');
+    if (!list) return;
+    const items = list.querySelectorAll('.chat-container');
+    if (!this.activeFilter && this.activeFilter !== "") {
+      // Show all
+      items.forEach(el => el.style.display = '');
+      return;
     }
-    const position = Math.max(0, ids.indexOf(targetCtxid));
-    await this.moveChat(ctxid, folderId || "", position);
+    const folder = this.activeFilter ? findFolder(this.activeFilter, this.tree?.folders || []) : null;
+    const visibleIds = folder ? new Set(folder.chat_ids || []) : new Set(this.getOrphanIds());
+    items.forEach(el => {
+      const ctxid = el.getAttribute('data-ctxid');
+      el.style.display = visibleIds.has(ctxid) ? '' : 'none';
+    });
   },
 
+  _clearFilter() {
+    const list = document.querySelector('.chats-config-list');
+    if (!list) return;
+    list.querySelectorAll('.chat-container').forEach(el => el.style.display = '');
+  },
+
+  // Observer: tag default chat items with data-ctxid and re-apply filter when list changes
+  _observer: null,
+  _startObserver() {
+    this._stopObserver();
+    const list = document.querySelector('.chats-config-list');
+    if (!list) return;
+    this._tagChatItems();
+    this._observer = new MutationObserver(() => {
+      this._tagChatItems();
+      this._applyFilter();
+    });
+    this._observer.observe(list, { childList: true, subtree: true });
+  },
+
+  _stopObserver() {
+    if (this._observer) { this._observer.disconnect(); this._observer = null; }
+  },
+
+  _tagChatItems() {
+    const chats = this.getAllChats();
+    const list = document.querySelector('.chats-config-list');
+    if (!list) return;
+    const items = list.querySelectorAll('.chat-container');
+    items.forEach((el, i) => {
+      if (!el.getAttribute('data-ctxid') && chats[i]) {
+        el.setAttribute('data-ctxid', chats[i].id);
+      }
+    });
+  },
+
+  // Context menu
   openContextMenu(ev, folderId) {
     ev.preventDefault();
     ev.stopPropagation();
@@ -240,7 +241,7 @@ export const store = createStore("chatOrganizer", {
     this.editValue = findFolderName(folderId, this.tree?.folders || []);
     this.closeContextMenu();
     setTimeout(() => {
-      const el = document.getElementById(`rename-input-${folderId}`);
+      const el = document.getElementById(`co-rename-${folderId}`);
       if (el) { el.focus(); el.select(); }
     }, 50);
   },
@@ -261,18 +262,16 @@ export const store = createStore("chatOrganizer", {
     if (name && name.trim()) this.createFolder(name.trim(), parentId);
   },
 
-  async newChat() {
-    try {
-      const chats = this.getChatsStore();
-      if (chats?.newChat) await chats.newChat();
-      await this.loadTree();
-    } catch (e) {
-      console.error("ChatOrganizer: newChat failed", e);
-      justToast("Failed to create chat", "error", 3000, "chat-organizer");
-    }
+  // Drag-and-drop from default chat list onto folders
+  dragOverFolder(ev, folderId) {
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = "move";
   },
 
-  selectChat(ctxid) { this.getChatsStore()?.selectChat?.(ctxid); },
-  isSelected(ctxid) { return this.getChatsStore()?.selected === ctxid; },
-  killChat(ctxid) { this.getChatsStore()?.killChat?.(ctxid); },
+  async dropOnFolder(ev, folderId = "") {
+    ev.preventDefault();
+    // Try to get ctxid from the dropped element's data attribute
+    const ctxid = ev.dataTransfer.getData("text/plain") || ev.target.closest('.chat-container')?.getAttribute('data-ctxid');
+    if (ctxid) await this.moveChat(ctxid, folderId);
+  },
 });
