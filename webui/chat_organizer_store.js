@@ -42,13 +42,39 @@ function collectAssignedIds(folders, out = new Set()) {
   return out;
 }
 
+function flattenFolders(folders, out = []) {
+  walkFolders(folders, (folder) => {
+    out.push({ id: folder.id, name: folder.name, depth: 0 });
+  });
+  // Add depth info
+  function walkDepth(list, depth) {
+    for (const f of list) {
+      const entry = out.find(e => e.id === f.id);
+      if (entry) entry.depth = depth;
+      walkDepth(f.children || [], depth + 1);
+    }
+  }
+  walkDepth(folders, 0);
+  return out;
+}
+
+function findFolderForChat(ctxid, folders) {
+  for (const folder of folders || []) {
+    if ((folder.chat_ids || []).includes(ctxid)) return folder;
+    const found = findFolderForChat(ctxid, folder.children || []);
+    if (found) return found;
+  }
+  return null;
+}
+
 export const store = createStore("chatOrganizer", {
   tree: null,
-  contextMenu: null,
+  contextMenu: null,        // folder context menu
+  chatContextMenu: null,    // chat context menu {ctxid, x, y}
   editingId: null,
   editValue: "",
   expanded: {},
-  activeFilter: null, // null = show all, "" = unfiled, folderId = that folder
+  activeFilter: null,
 
   init() {
     if (!this.tree) this.loadTree();
@@ -61,8 +87,10 @@ export const store = createStore("chatOrganizer", {
 
   cleanup() {
     this.contextMenu = null;
+    this.chatContextMenu = null;
     this._stopObserver();
     this._clearFilter();
+    this._removeChatInteractions();
   },
 
   async loadTree() {
@@ -119,10 +147,15 @@ export const store = createStore("chatOrganizer", {
     try {
       await api("move_chat", { ctxid, folder_id: folderId || "", position });
       await this.loadTree();
+      toastFrontendSuccess("Chat moved", "Chat Organizer");
     } catch (e) {
       console.error("ChatOrganizer: move chat failed", e);
       toastFrontendError("Failed to move chat", "Chat Organizer");
     }
+  },
+
+  async removeChatFromFolder(ctxid) {
+    await this.moveChat(ctxid, "");
   },
 
   isExpanded(id) { return !!this.expanded[id]; },
@@ -136,18 +169,16 @@ export const store = createStore("chatOrganizer", {
   getChatsStore() { return window.Alpine?.store("chats"); },
   getAllChats() { return this.getChatsStore()?.contexts || []; },
 
-  getFolderChats(folder) {
-    const chats = this.getAllChats();
-    const ids = folder.chat_ids || [];
-    return ids.map(id => chats.find(c => c.id === id)).filter(Boolean);
-  },
-
   getOrphanIds() {
     const assigned = collectAssignedIds(this.tree?.folders || []);
     return this.getAllChats().filter(c => !assigned.has(c.id)).map(c => c.id);
   },
 
-  // Build flat rows for rendering the folder tree (folders only, no chat items)
+  getFolderForChat(ctxid) {
+    return findFolderForChat(ctxid, this.tree?.folders || []);
+  },
+
+  // Build flat rows for rendering the folder tree (folders only)
   getRows() {
     const rows = [];
     const pushFolder = (folder, depth) => {
@@ -179,7 +210,6 @@ export const store = createStore("chatOrganizer", {
     if (!list) return;
     const items = list.querySelectorAll('.chat-container');
     if (!this.activeFilter && this.activeFilter !== "") {
-      // Show all
       items.forEach(el => el.style.display = '');
       return;
     }
@@ -197,15 +227,19 @@ export const store = createStore("chatOrganizer", {
     list.querySelectorAll('.chat-container').forEach(el => el.style.display = '');
   },
 
-  // Observer: tag default chat items with data-ctxid and re-apply filter when list changes
+  // ── Observer + Chat interaction attachment ──
   _observer: null,
+  _attachedChats: new WeakSet(),
+
   _startObserver() {
     this._stopObserver();
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
     this._tagChatItems();
+    this._attachChatInteractions();
     this._observer = new MutationObserver(() => {
       this._tagChatItems();
+      this._attachChatInteractions();
       this._applyFilter();
     });
     this._observer.observe(list, { childList: true, subtree: true });
@@ -227,7 +261,60 @@ export const store = createStore("chatOrganizer", {
     });
   },
 
-  // Context menu
+  _attachChatInteractions() {
+    const items = document.querySelectorAll('.chats-config-list .chat-container');
+    const self = this;
+    items.forEach((el) => {
+      if (self._attachedChats.has(el)) return;
+      self._attachedChats.add(el);
+
+      // Make draggable
+      el.setAttribute('draggable', 'true');
+      el.addEventListener('dragstart', function(ev) {
+        const ctxid = el.getAttribute('data-ctxid');
+        if (ctxid) {
+          ev.dataTransfer.effectAllowed = 'move';
+          ev.dataTransfer.setData('text/plain', ctxid);
+        }
+      });
+
+      // Right-click context menu on chat
+      el.addEventListener('contextmenu', function(ev) {
+        const ctxid = el.getAttribute('data-ctxid');
+        if (ctxid) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          self.chatContextMenu = { ctxid, x: ev.clientX, y: ev.clientY };
+        }
+      });
+    });
+  },
+
+  _removeChatInteractions() {
+    const items = document.querySelectorAll('.chats-config-list .chat-container');
+    items.forEach((el) => {
+      el.removeAttribute('draggable');
+    });
+  },
+
+  // ── Chat context menu ──
+  closeChatContextMenu() { this.chatContextMenu = null; },
+
+  getFlatFolders() {
+    return flattenFolders(this.tree?.folders || []);
+  },
+
+  getChatCurrentFolderName(ctxid) {
+    const folder = findFolderForChat(ctxid, this.tree?.folders || []);
+    return folder ? folder.name : null;
+  },
+
+  moveChatToFolder(ctxid, folderId) {
+    this.closeChatContextMenu();
+    this.moveChat(ctxid, folderId || "");
+  },
+
+  // ── Folder context menu ──
   openContextMenu(ev, folderId) {
     ev.preventDefault();
     ev.stopPropagation();
@@ -262,7 +349,7 @@ export const store = createStore("chatOrganizer", {
     if (name && name.trim()) this.createFolder(name.trim(), parentId);
   },
 
-  // Drag-and-drop from default chat list onto folders
+  // ── Drag-and-drop onto folders ──
   dragOverFolder(ev, folderId) {
     ev.preventDefault();
     ev.dataTransfer.dropEffect = "move";
@@ -270,8 +357,7 @@ export const store = createStore("chatOrganizer", {
 
   async dropOnFolder(ev, folderId = "") {
     ev.preventDefault();
-    // Try to get ctxid from the dropped element's data attribute
-    const ctxid = ev.dataTransfer.getData("text/plain") || ev.target.closest('.chat-container')?.getAttribute('data-ctxid');
+    const ctxid = ev.dataTransfer.getData("text/plain");
     if (ctxid) await this.moveChat(ctxid, folderId);
   },
 });
