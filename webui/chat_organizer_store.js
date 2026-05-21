@@ -5,6 +5,7 @@ import { toastFrontendError, toastFrontendSuccess, toastFrontendInfo } from "/co
 const PLUGIN = "chat_organizer";
 const CHAT_DRAG_TYPE = "application/x-chat-organizer-ctxid";
 const VISIBLE_ORDER_KEY = "chat_organizer.visible_order.v1";
+const EXPANDED_KEY = "chat_organizer.expanded.v1";
 
 async function api(action, body = {}) {
   return await callJsonApi(`/plugins/${PLUGIN}/tree_handler`, { ...body, action });
@@ -119,6 +120,52 @@ export const store = createStore("chatOrganizer", {
     this._removeChatInteractions();
   },
 
+  _loadExpandedState() {
+    try {
+      const raw = localStorage.getItem(EXPANDED_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch (_e) {
+      return null;
+    }
+  },
+
+  _saveExpandedState() {
+    try {
+      localStorage.setItem(EXPANDED_KEY, JSON.stringify(this.expanded || {}));
+    } catch (_e) {
+      // localStorage unavailable/quota; expansion still works for this session.
+    }
+  },
+
+  _defaultExpandedForFolders(folders, out = {}) {
+    for (const folder of folders || []) {
+      if ((folder.children || []).length > 0) out[folder.id] = true;
+      this._defaultExpandedForFolders(folder.children || [], out);
+    }
+    return out;
+  },
+
+  _restoreOrDefaultExpanded() {
+    const saved = this._loadExpandedState();
+    if (saved) {
+      // Keep only saved IDs that still exist in the current tree.
+      const valid = new Set();
+      walkFolders(this.tree?.folders || [], f => valid.add(f.id));
+      const cleaned = {};
+      for (const [id, value] of Object.entries(saved)) {
+        if (valid.has(id)) cleaned[id] = !!value;
+      }
+      this.expanded = cleaned;
+      this._saveExpandedState();
+      return;
+    }
+
+    // First run / no saved state: make nested structure visible by default.
+    this.expanded = this._defaultExpandedForFolders(this.tree?.folders || [], {});
+    this._saveExpandedState();
+  },
+
   async loadTree() {
     try {
       this.tree = await api("get_tree");
@@ -129,6 +176,7 @@ export const store = createStore("chatOrganizer", {
         const localOrder = this._loadLocalVisibleOrder();
         if (localOrder.length > 0) this.tree.visible_order = localOrder;
       }
+      this._restoreOrDefaultExpanded();
       this._syncChatsStoreOrder();
       this._applyFilter();
     } catch (e) {
@@ -151,7 +199,10 @@ export const store = createStore("chatOrganizer", {
       // subfolder is visible immediately.
       await this.loadTree();
       if (parentId) this.expandFolderPath(parentId);
-      if (newFolderId) this.expanded = { ...this.expanded, [newFolderId]: true };
+      if (newFolderId) {
+        this.expanded = { ...this.expanded, [newFolderId]: true };
+        this._saveExpandedState();
+      }
       if (!parentId && newFolderId) this.expandFolderPath(newFolderId);
 
       toastFrontendSuccess("Folder created", "Chat Organizer");
@@ -239,10 +290,12 @@ export const store = createStore("chatOrganizer", {
     const nextExpanded = { ...this.expanded };
     for (const id of path) nextExpanded[id] = true;
     this.expanded = nextExpanded;
+    this._saveExpandedState();
   },
 
   toggleFolder(id) {
     this.expanded = { ...this.expanded, [id]: !this.expanded[id] };
+    this._saveExpandedState();
   },
 
   folderTotalChats(folder) { return countTotalChats(folder); },

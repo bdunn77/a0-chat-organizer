@@ -71,3 +71,7 @@ Child folders are visually indented under their parent folders. Selecting a pare
 ## Subfolder Creation Visibility (v1.5.1)
 
 Creating a subfolder now reloads the tree first and then expands the full parent path, so the first child folder appears immediately under its parent without requiring a second subfolder or manual refresh.
+
+## Folder Expansion Persistence (v1.5.2)
+
+Folder expanded/collapsed state is now persisted in localStorage. On first run with no saved expansion state, folders that contain children are expanded by default so nested subfolders are visible after a hard refresh. User collapse/expand preferences are preserved afterwards.
