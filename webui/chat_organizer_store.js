@@ -37,6 +37,12 @@ function countTotalChats(folder) {
   return n;
 }
 
+function collectFolderChatIds(folder, out = []) {
+  for (const id of folder?.chat_ids || []) out.push(id);
+  for (const child of folder?.children || []) collectFolderChatIds(child, out);
+  return out;
+}
+
 function collectAssignedIds(folders, out = new Set()) {
   walkFolders(folders, (folder) => {
     for (const id of folder.chat_ids || []) out.add(id);
@@ -367,7 +373,10 @@ export const store = createStore("chatOrganizer", {
     // Filtered view (specific folder or Unfiled): hide non-matching items by their
     // parent <li> wrapper so hidden rows do not leave empty space in the sidebar.
     const folder = this.activeFilter ? findFolder(this.activeFilter, this.tree?.folders || []) : null;
-    const visibleIds = folder ? new Set(folder.chat_ids || []) : new Set(this.getOrphanIds());
+    // Parent folders show every chat contained anywhere inside that folder tree,
+    // including chats in child/grandchild folders. This is filtering only; it
+    // does not change folder membership or direct folder chat_ids.
+    const visibleIds = folder ? new Set(collectFolderChatIds(folder)) : new Set(this.getOrphanIds());
     items.forEach(el => {
       const ctxid = el.getAttribute('data-ctxid');
       const visible = visibleIds.has(ctxid);

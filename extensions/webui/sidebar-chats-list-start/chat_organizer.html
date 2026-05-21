@@ -28,8 +28,8 @@
                   <template x-if="row.type === 'folder'">
                     <div class="co-folder-row"
                          :data-folder-id="row.folder.id"
-                         :class="{'co-active': $store.chatOrganizer.activeFilter === row.folder.id, 'co-drop-target': $store.chatOrganizer.dragOverFolderId === row.folder.id}"
-                         :style="{ paddingLeft: (4 + row.depth * 16) + 'px' }"
+                         :class="{'co-active': $store.chatOrganizer.activeFilter === row.folder.id, 'co-drop-target': $store.chatOrganizer.dragOverFolderId === row.folder.id, 'co-nested-folder-row': row.depth > 0}"
+                         :style="{ paddingLeft: (6 + row.depth * 24) + 'px', '--co-depth': row.depth }"
                          @dragenter="$store.chatOrganizer.dragOverFolder($event, row.folder.id)"
                          @dragover="$store.chatOrganizer.dragOverFolder($event, row.folder.id)"
                          @dragleave="$store.chatOrganizer.dragLeaveFolder($event, row.folder.id)"
@@ -187,6 +187,27 @@
       background: var(--co-row-hover-bg);
       color: var(--co-text) !important;
       border-color: var(--co-border);
+    }
+
+    .co-folder-row.co-nested-folder-row {
+      position: relative;
+    }
+
+    .co-folder-row.co-nested-folder-row::before {
+      content: "";
+      position: absolute;
+      left: calc(14px + (var(--co-depth, 1) - 1) * 24px);
+      top: 5px;
+      bottom: 5px;
+      width: 2px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.42);
+      pointer-events: none;
+    }
+
+    .co-folder-row.co-nested-folder-row.co-active::before,
+    .co-folder-row.co-nested-folder-row:hover::before {
+      background: rgba(255, 255, 255, 0.62);
     }
 
     .co-folder-row.co-active,

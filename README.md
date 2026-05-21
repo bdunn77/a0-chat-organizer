@@ -63,3 +63,7 @@ Reordering in All Chats now updates the visible sidebar order optimistically bef
 ## Production Notes (v1.4.2)
 
 The unified `visible_order` also projects back into each folder's `chat_ids` and the Unfiled `orphan_order`, so filtered folder views, Unfiled view, and All Chats view remain consistent after mixed sidebar reordering. Pointer-drag cleanup aborts safely on plugin unmount, pointer cancel, or ESC.
+
+## Nested Folder Behavior (v1.5.0)
+
+Child folders are visually indented under their parent folders. Selecting a parent folder shows every chat inside that folder tree, including chats assigned directly to the parent plus chats assigned to any child or descendant folder. Direct folder membership is still preserved for moving/reordering; recursive inclusion is used for filtering/display.
