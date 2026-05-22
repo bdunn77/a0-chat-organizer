@@ -75,3 +75,7 @@ Creating a subfolder now reloads the tree first and then expands the full parent
 ## Folder Expansion Persistence (v1.5.2)
 
 Folder expanded/collapsed state is now persisted in localStorage. On first run with no saved expansion state, folders that contain children are expanded by default so nested subfolders are visible after a hard refresh. User collapse/expand preferences are preserved afterwards.
+
+## Resizable Folder Panel (v1.6.0)
+
+A draggable divider sits between the folder panel and the chat list. Drag the divider up/down to resize the folder panel and reveal more folders or more chats. Double-click the divider to reset to the default size. The chosen size is remembered in localStorage so it persists across hard refreshes.

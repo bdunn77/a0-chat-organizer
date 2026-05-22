@@ -6,6 +6,7 @@ const PLUGIN = "chat_organizer";
 const CHAT_DRAG_TYPE = "application/x-chat-organizer-ctxid";
 const VISIBLE_ORDER_KEY = "chat_organizer.visible_order.v1";
 const EXPANDED_KEY = "chat_organizer.expanded.v1";
+const PANEL_HEIGHT_KEY = "chat_organizer.panel_height.v1";
 
 async function api(action, body = {}) {
   return await callJsonApi(`/plugins/${PLUGIN}/tree_handler`, { ...body, action });
@@ -83,6 +84,7 @@ export const store = createStore("chatOrganizer", {
   editingId: null,
   editValue: "",
   expanded: {},
+  panelHeight: null,
   activeFilter: null,
   draggedCtxid: null,
   dragOverFolderId: null,
@@ -103,6 +105,7 @@ export const store = createStore("chatOrganizer", {
     this._active = true;
     this.loadTree();
     this._startObserver();
+    this._restorePanelHeight();
   },
 
   cleanup() {
@@ -120,7 +123,97 @@ export const store = createStore("chatOrganizer", {
     this._removeChatInteractions();
   },
 
-  _loadExpandedState() {
+  // ── Resizable folder panel divider ──
+  _loadPanelHeight() {
+    try {
+      const raw = localStorage.getItem(PANEL_HEIGHT_KEY);
+      const value = raw ? parseFloat(raw) : NaN;
+      return Number.isFinite(value) && value >= 40 ? value : null;
+    } catch (_e) {
+      return null;
+    }
+  },
+
+  _savePanelHeight(height) {
+    try {
+      localStorage.setItem(PANEL_HEIGHT_KEY, String(Math.round(height)));
+    } catch (_e) {
+      // localStorage unavailable; resize still works for this session.
+    }
+  },
+
+  _applyPanelHeight() {
+    const root = document.querySelector('.chat-organizer-root');
+    if (!root) return;
+    if (this.panelHeight && this.panelHeight >= 40) {
+      root.style.height = this.panelHeight + 'px';
+      root.style.maxHeight = 'none';
+    }
+  },
+
+  _restorePanelHeight() {
+    const saved = this._loadPanelHeight();
+    if (!saved) return;
+    this.panelHeight = saved;
+    // Defer DOM mutation in case x-init fires before the element is in the DOM tree.
+    setTimeout(() => this._applyPanelHeight(), 0);
+  },
+
+  _resetPanelHeight() {
+    this.panelHeight = null;
+    try { localStorage.removeItem(PANEL_HEIGHT_KEY); } catch (_e) {}
+    const root = document.querySelector('.chat-organizer-root');
+    if (root) {
+      root.style.height = '';
+      root.style.maxHeight = '';
+    }
+  },
+
+  startPanelResize(ev) {
+    if (!this._active) return;
+    if (ev.button !== undefined && ev.button !== 0) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    const root = document.querySelector('.chat-organizer-root');
+    if (!root) return;
+    const handle = root.querySelector('.co-resize-handle');
+    if (handle) handle.classList.add('co-resizing');
+    document.body.classList.add('co-resizing-folder-panel');
+
+    const startY = ev.clientY;
+    const startHeight = root.getBoundingClientRect().height;
+    const section = root.closest('#chats-section') || root.parentElement;
+    const sectionRect = section ? section.getBoundingClientRect() : null;
+    const minHeight = 60;
+    // Leave at least ~140px for the chats header + visible chats below.
+    const chatsReserve = 140;
+    const maxHeight = sectionRect
+      ? Math.max(minHeight + 60, sectionRect.height - chatsReserve)
+      : 800;
+
+    const onMove = (event) => {
+      event.preventDefault();
+      const dy = event.clientY - startY;
+      const next = Math.max(minHeight, Math.min(maxHeight, startHeight + dy));
+      root.style.height = next + 'px';
+      root.style.maxHeight = 'none';
+      this.panelHeight = next;
+    };
+    const onUp = (event) => {
+      document.removeEventListener('pointermove', onMove, true);
+      document.removeEventListener('pointerup', onUp, true);
+      document.removeEventListener('pointercancel', onUp, true);
+      if (handle) handle.classList.remove('co-resizing');
+      document.body.classList.remove('co-resizing-folder-panel');
+      if (this.panelHeight) this._savePanelHeight(this.panelHeight);
+    };
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('pointercancel', onUp, true);
+  },
+
+    _loadExpandedState() {
     try {
       const raw = localStorage.getItem(EXPANDED_KEY);
       const parsed = raw ? JSON.parse(raw) : null;

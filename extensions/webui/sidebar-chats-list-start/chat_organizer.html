@@ -84,6 +84,14 @@
           </template>
         </div>
 
+        <div class="co-resize-handle"
+             title="Drag to resize folder panel (double-click to reset)"
+             role="separator"
+             aria-orientation="horizontal"
+             aria-label="Resize folder panel"
+             @pointerdown="$store.chatOrganizer.startPanelResize($event)"
+             @dblclick="$store.chatOrganizer._resetPanelHeight()"></div>
+
         <!-- Folder context menu (rename, new subfolder, delete) -->
         <template x-if="$store.chatOrganizer.contextMenu">
           <div class="co-context-menu" :style="{position: 'fixed', left: $store.chatOrganizer.contextMenu.x + 'px', top: $store.chatOrganizer.contextMenu.y + 'px'}" @click.outside="$store.chatOrganizer.closeContextMenu()">
@@ -208,6 +216,46 @@
     .co-folder-row.co-nested-folder-row.co-active::before,
     .co-folder-row.co-nested-folder-row:hover::before {
       background: rgba(255, 255, 255, 0.62);
+    }
+
+    .co-resize-handle {
+      flex: 0 0 auto;
+      height: 10px;
+      margin: 4px 0 2px 0;
+      cursor: ns-resize;
+      position: relative;
+      user-select: none;
+      touch-action: none;
+    }
+
+    .co-resize-handle::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 48px;
+      height: 3px;
+      border-radius: 999px;
+      background: var(--co-border, rgba(148, 163, 184, 0.45));
+      transition: background 0.12s ease, height 0.12s ease, width 0.12s ease;
+    }
+
+    .co-resize-handle:hover::before,
+    .co-resize-handle.co-resizing::before {
+      background: var(--co-focus, #93c5fd);
+      height: 4px;
+      width: 72px;
+    }
+
+    body.co-resizing-folder-panel {
+      cursor: ns-resize !important;
+      user-select: none;
+    }
+
+    body.co-resizing-folder-panel * {
+      cursor: ns-resize !important;
+      user-select: none !important;
     }
 
     .co-folder-row.co-active,
