@@ -733,6 +733,7 @@ export const store = createStore("chatOrganizer", {
       startY: ev.clientY,
       x: ev.clientX,
       y: ev.clientY,
+      startTime: Date.now(),
       active: false,
       targetCtxid: null,
       targetPosition: null,
@@ -764,7 +765,15 @@ export const store = createStore("chatOrganizer", {
 
     const dx = ev.clientX - drag.startX;
     const dy = ev.clientY - drag.startY;
-    if (!drag.active && Math.hypot(dx, dy) < 7) return;
+    const distance = Math.hypot(dx, dy);
+    const elapsed = Date.now() - (drag.startTime || 0);
+    // Activate drag only when the user has clearly committed to it: either moved
+    // a meaningful distance (10px) or held the pointer for 150ms with some movement.
+    // This prevents normal clicks with slight pointer drift from being treated as drags.
+    if (!drag.active) {
+      const shouldActivate = distance >= 10 || (elapsed >= 150 && distance >= 4);
+      if (!shouldActivate) return;
+    }
 
     ev.preventDefault();
     ev.stopPropagation();
@@ -797,10 +806,17 @@ export const store = createStore("chatOrganizer", {
     document.removeEventListener('keydown', this._boundKey, true);
 
     if (drag.active) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      this.suppressClickOnce = true;
-      setTimeout(() => { this.suppressClickOnce = false; }, 80);
+      const hadAction = (drag.targetCtxid && drag.targetCtxid !== drag.ctxid) ||
+                        (drag.targetFolderId !== null && drag.targetFolderId !== undefined);
+      // Only suppress the upcoming synthetic click if we are actually committing
+      // a drag action. If the user activated drag but released over nothing, let
+      // the click pass through so they can still navigate normally.
+      if (hadAction) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.suppressClickOnce = true;
+        setTimeout(() => { this.suppressClickOnce = false; }, 120);
+      }
 
       if (drag.targetCtxid && drag.targetCtxid !== drag.ctxid) {
         await this.dropChatNearChat(drag.ctxid, drag.targetCtxid, drag.targetPosition || 'before');

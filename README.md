@@ -79,3 +79,7 @@ Folder expanded/collapsed state is now persisted in localStorage. On first run w
 ## Resizable Folder Panel (v1.6.0)
 
 A draggable divider sits between the folder panel and the chat list. Drag the divider up/down to resize the folder panel and reveal more folders or more chats. Double-click the divider to reset to the default size. The chosen size is remembered in localStorage so it persists across hard refreshes.
+
+## Click Reliability (v1.6.1)
+
+Chat clicks now register reliably even when the pointer drifts slightly during the click. Drag activation requires either 10px of movement or 150ms hold time with at least 4px of movement, so normal clicks always pass through. The synthetic-click suppression only triggers when a drag actually commits a move/reorder action.
