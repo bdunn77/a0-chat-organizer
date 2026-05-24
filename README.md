@@ -83,3 +83,7 @@ A draggable divider sits between the folder panel and the chat list. Drag the di
 ## Click Reliability (v1.6.1)
 
 Chat clicks now register reliably even when the pointer drifts slightly during the click. Drag activation requires either 10px of movement or 150ms hold time with at least 4px of movement, so normal clicks always pass through. The synthetic-click suppression only triggers when a drag actually commits a move/reorder action.
+
+## Reactive Updates (v1.6.2)
+
+Folder chat counts now update immediately when chats are deleted: the plugin reconciles its folder tree, orphan order, and visible order against the live chat list and removes stale IDs. The observer batches rapid sidebar DOM mutations into a single microtask update for snappier response, and a lightweight 1.2s polling fallback catches changes that do not trigger DOM mutations (e.g., backend push updates). Backend persistence of reconciled order is debounced.

@@ -96,6 +96,9 @@ export const store = createStore("chatOrganizer", {
   suppressClickOnce: false,
   _active: false,
   _attachmentOverlayPatched: false,
+  _lastChatIdsSignature: '',
+  _observerPending: false,
+  _reconcilePersistTimer: null,
 
   init() {
     if (!this.tree) this.loadTree();
@@ -270,6 +273,7 @@ export const store = createStore("chatOrganizer", {
         if (localOrder.length > 0) this.tree.visible_order = localOrder;
       }
       this._restoreOrDefaultExpanded();
+      this._maybeReconcile();
       this._syncChatsStoreOrder();
       this._applyFilter();
     } catch (e) {
@@ -574,6 +578,64 @@ export const store = createStore("chatOrganizer", {
     });
   },
 
+  // ── Tree ↔ live chats reconciliation ──
+  _liveChatIds() {
+    return new Set(this.getAllChats().map(c => c.id).filter(Boolean));
+  },
+
+  _chatIdsSignature() {
+    const ids = this.getAllChats().map(c => c.id).filter(Boolean);
+    return ids.length + ':' + ids.join('|');
+  },
+
+  _reconcileTreeWithChats() {
+    if (!this.tree) return false;
+    const live = this._liveChatIds();
+    let changed = false;
+
+    const cleanFolder = (folder) => {
+      const before = (folder.chat_ids || []).length;
+      folder.chat_ids = (folder.chat_ids || []).filter(id => live.has(id));
+      if (folder.chat_ids.length !== before) changed = true;
+      for (const child of folder.children || []) cleanFolder(child);
+    };
+    for (const folder of this.tree.folders || []) cleanFolder(folder);
+
+    const beforeOrphans = (this.tree.orphan_order || []).length;
+    this.tree.orphan_order = (this.tree.orphan_order || []).filter(id => live.has(id));
+    if (this.tree.orphan_order.length !== beforeOrphans) changed = true;
+
+    const beforeVisible = (this.tree.visible_order || []).length;
+    this.tree.visible_order = (this.tree.visible_order || []).filter(id => live.has(id));
+    if (this.tree.visible_order.length !== beforeVisible) {
+      changed = true;
+      this._saveLocalVisibleOrder(this.tree.visible_order);
+    }
+
+    if (changed) this._schedulePersistReconcile();
+    return changed;
+  },
+
+  _schedulePersistReconcile() {
+    // Debounce backend persistence so rapid deletions only result in one call.
+    if (this._reconcilePersistTimer) clearTimeout(this._reconcilePersistTimer);
+    this._reconcilePersistTimer = setTimeout(async () => {
+      this._reconcilePersistTimer = null;
+      try {
+        await api("set_visible_order", { ctxids: this.tree?.visible_order || [] });
+      } catch (_e) {
+        // Backend not yet reloaded; localStorage fallback already saved.
+      }
+    }, 600);
+  },
+
+  _maybeReconcile() {
+    const sig = this._chatIdsSignature();
+    if (sig === this._lastChatIdsSignature) return;
+    this._lastChatIdsSignature = sig;
+    this._reconcileTreeWithChats();
+  },
+
   // ── Observer + Chat interaction attachment ──
   _observer: null,
   _attachedChats: new WeakSet(),
@@ -585,17 +647,31 @@ export const store = createStore("chatOrganizer", {
     this._patchAttachmentOverlay();
     this._tagChatItems();
     this._attachChatInteractions();
-    this._observer = new MutationObserver(() => {
+    const runObserverWork = () => {
+      this._observerPending = false;
+      this._maybeReconcile();
       this._syncChatsStoreOrder();
       this._tagChatItems();
       this._attachChatInteractions();
       this._applyFilter();
+    };
+    this._observer = new MutationObserver(() => {
+      // Coalesce rapid mutations into a single microtask-batched update so the
+      // sidebar feels snappier and we avoid redundant DOM scans.
+      if (this._observerPending) return;
+      this._observerPending = true;
+      queueMicrotask(runObserverWork);
     });
     this._observer.observe(list, { childList: true, subtree: true });
+    // Lightweight polling fallback for chats added/removed without DOM mutation
+    // (e.g., backend push). Cheap signature check; only does work when needed.
+    this._reconcilePoll = setInterval(() => this._maybeReconcile(), 1200);
   },
 
   _stopObserver() {
     if (this._observer) { this._observer.disconnect(); this._observer = null; }
+    if (this._reconcilePoll) { clearInterval(this._reconcilePoll); this._reconcilePoll = null; }
+    if (this._reconcilePersistTimer) { clearTimeout(this._reconcilePersistTimer); this._reconcilePersistTimer = null; }
   },
 
   _tagChatItems() {
