@@ -20,6 +20,16 @@
         </div>
 
         <div class="co-tree-scroll">
+          <template x-if="$store.chatOrganizer.isCreating()">
+            <div class="co-folder-row co-create-row">
+              <span class="material-symbols-outlined co-toggle-icon">create_new_folder</span>
+              <input id="co-create-input" class="co-rename-input" placeholder="Folder name"
+                     x-model="$store.chatOrganizer.createValue"
+                     @keydown.enter="$store.chatOrganizer.finishCreate()"
+                     @keydown.escape="$store.chatOrganizer.cancelCreate()"
+                     @blur="$store.chatOrganizer.finishCreate()">
+            </div>
+          </template>
           <template x-if="$store.chatOrganizer.tree">
             <div>
               <template x-for="row in $store.chatOrganizer.getRows()" :key="row.key">

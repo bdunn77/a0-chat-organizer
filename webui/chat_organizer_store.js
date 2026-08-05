@@ -83,6 +83,8 @@ export const store = createStore("chatOrganizer", {
   chatContextMenu: null,    // chat context menu {ctxid, x, y}
   editingId: null,
   editValue: "",
+  creating: null,           // inline folder create state: {parentId} or null
+  createValue: "",
   expanded: {},
   panelHeight: null,
   activeFilter: null,
@@ -1136,9 +1138,30 @@ export const store = createStore("chatOrganizer", {
   isEditing(id) { return this.editingId === id; },
 
   showCreateFolder(parentId = null) {
-    const name = prompt("Folder name:");
-    if (name && name.trim()) this.createFolder(name.trim(), parentId);
+    // window.prompt() is not supported in this WebUI environment;
+    // use an inline input row like the rename flow instead.
+    this.creating = { parentId };
+    this.createValue = "";
+    this.closeContextMenu();
+    if (parentId) this.expandFolderPath(parentId);
+    setTimeout(() => {
+      const el = document.getElementById("co-create-input");
+      if (el) el.focus();
+    }, 50);
   },
+
+  finishCreate() {
+    if (!this.creating) return;
+    const { parentId } = this.creating;
+    const name = this.createValue.trim();
+    this.creating = null;
+    this.createValue = "";
+    if (name) this.createFolder(name, parentId);
+  },
+
+  cancelCreate() { this.creating = null; this.createValue = ""; },
+
+  isCreating() { return this.creating !== null; },
 
   // ── Drag-and-drop onto folders ──
   dragOverFolder(ev, folderId) {
