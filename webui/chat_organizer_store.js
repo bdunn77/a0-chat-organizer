@@ -87,6 +87,14 @@ function chatIdFromElement(el) {
   return id == null ? "" : String(id);
 }
 
+
+function isChatArchived(id) {
+  // Cooperate with the chat_archive plugin: archived chats are removed from
+  // the Alpine chats store asynchronously and should not count toward
+  // folder/orphan badges or appear in filtered views.
+  const archive = window.Alpine?.store?.("chatArchive");
+  return !!(archive?.isArchived?.(id));
+}
 export const store = createStore("chatOrganizer", {
   tree: null,
   contextMenu: null,        // folder context menu
@@ -405,14 +413,21 @@ export const store = createStore("chatOrganizer", {
     this._saveExpandedState();
   },
 
-  folderTotalChats(folder) { return countTotalChats(folder); },
+  folderTotalChats(folder) {
+    // Count only non-archived chats so the badge matches visible rows.
+    let n = (folder.chat_ids || []).filter(id => !isChatArchived(id)).length;
+    for (const child of folder.children || []) n += this.folderTotalChats(child);
+    return n;
+  },
 
   getChatsStore() { return window.Alpine?.store("chats"); },
   getAllChats() { return this.getChatsStore()?.contexts || []; },
 
   getOrphanIds() {
     const assigned = collectAssignedIds(this.tree?.folders || []);
-    const ids = this.getAllChats().filter(c => !assigned.has(c.id)).map(c => c.id);
+    const ids = this.getAllChats()
+      .filter(c => !c?.parent_context_id && !assigned.has(c.id) && !isChatArchived(c.id))
+      .map(c => c.id);
     const available = new Set(ids);
     const ordered = [];
     for (const id of this.tree?.orphan_order || []) {
