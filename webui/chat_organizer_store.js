@@ -77,6 +77,16 @@ function findFolderForChat(ctxid, folders) {
   return null;
 }
 
+function chatIdFromElement(el) {
+  // Chat rows are rendered from two independent Alpine x-for scopes:
+  // `context` for top-level chats and `child` for nested chats. Their DOM order
+  // does not necessarily match the flat chats.contexts array, so deriving IDs
+  // by array index can assign folder membership to the wrong visible chat.
+  const scope = window.Alpine?.$data?.(el);
+  const id = scope?.child?.id ?? scope?.context?.id;
+  return id == null ? "" : String(id);
+}
+
 export const store = createStore("chatOrganizer", {
   tree: null,
   contextMenu: null,        // folder context menu
@@ -542,39 +552,54 @@ export const store = createStore("chatOrganizer", {
   _applyFilter() {
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
-    const items = list.querySelectorAll('.chat-container');
-    // "All Chats" view: show everything (clear styles on both li wrappers and chat-containers).
+    this._tagChatItems();
+
+    // "All Chats" view: remove only plugin-owned visibility overrides and let
+    // Alpine restore each chat tree's normal expanded/collapsed state.
     if (!this.activeFilter && this.activeFilter !== "") {
-      items.forEach(el => {
-        el.style.display = '';
-        const li = el.closest('li');
-        if (li) li.style.display = '';
-      });
+      this._clearFilter();
       return;
     }
-    // Filtered view (specific folder or Unfiled): hide non-matching items by their
-    // parent <li> wrapper so hidden rows do not leave empty space in the sidebar.
+
     const folder = this.activeFilter ? findFolder(this.activeFilter, this.tree?.folders || []) : null;
-    // Parent folders show every chat contained anywhere inside that folder tree,
-    // including chats in child/grandchild folders. This is filtering only; it
-    // does not change folder membership or direct folder chat_ids.
+    // Parent folders include chats assigned to descendant folders. This affects
+    // visibility only; direct folder membership remains unchanged.
     const visibleIds = folder ? new Set(collectFolderChatIds(folder)) : new Set(this.getOrphanIds());
-    items.forEach(el => {
-      const ctxid = el.getAttribute('data-ctxid');
-      const visible = visibleIds.has(ctxid);
-      el.style.display = visible ? '' : 'none';
-      const li = el.closest('li');
-      if (li) li.style.display = visible ? '' : 'none';
+
+    // The core sidebar renders one top-level <li> containing the parent row and
+    // all child rows. Hiding that wrapper merely because the parent itself does
+    // not match would also hide matching children, so filter each row first and
+    // retain the wrapper whenever the parent or at least one child is visible.
+    list.querySelectorAll(':scope > .chat-tree-item').forEach(treeItem => {
+      const parentRow = treeItem.querySelector(':scope > .chat-container');
+      const childList = treeItem.querySelector(':scope > .chat-child-list');
+      const childRows = childList ? childList.querySelectorAll(':scope > li > .chat-container') : [];
+
+      const parentVisible = !!parentRow && visibleIds.has(parentRow.getAttribute('data-ctxid'));
+      if (parentRow) parentRow.style.display = parentVisible ? '' : 'none';
+
+      let childVisible = false;
+      childRows.forEach(row => {
+        const visible = visibleIds.has(row.getAttribute('data-ctxid'));
+        row.style.display = visible ? '' : 'none';
+        const childItem = row.closest('li');
+        if (childItem) childItem.style.display = visible ? '' : 'none';
+        childVisible ||= visible;
+      });
+
+      treeItem.style.display = parentVisible || childVisible ? '' : 'none';
+      if (childList) childList.classList.toggle('co-filter-forced-open', childVisible);
     });
   },
 
   _clearFilter() {
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
-    list.querySelectorAll('.chat-container').forEach(el => {
+    list.querySelectorAll('.chat-container, .chat-tree-item, .chat-child-list > li').forEach(el => {
       el.style.display = '';
-      const li = el.closest('li');
-      if (li) li.style.display = '';
+    });
+    list.querySelectorAll('.chat-child-list.co-filter-forced-open').forEach(el => {
+      el.classList.remove('co-filter-forced-open');
     });
   },
 
@@ -675,14 +700,18 @@ export const store = createStore("chatOrganizer", {
   },
 
   _tagChatItems() {
-    const chats = this.getAllChats();
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
     const items = list.querySelectorAll('.chat-container');
-    items.forEach((el, i) => {
-      if (chats[i]) {
-        // Always refresh: Alpine may reuse DOM nodes when contexts are reordered.
-        el.setAttribute('data-ctxid', chats[i].id);
+    items.forEach((el) => {
+      const ctxid = chatIdFromElement(el);
+      if (ctxid) {
+        // Always refresh: Alpine may reuse DOM nodes when keyed rows are moved.
+        el.setAttribute('data-ctxid', ctxid);
+      } else {
+        // Never retain a stale identity on a recycled row. A temporarily
+        // untagged row is safer than moving/filtering the wrong chat.
+        el.removeAttribute('data-ctxid');
       }
     });
   },
