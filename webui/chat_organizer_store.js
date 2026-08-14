@@ -717,6 +717,12 @@ export const store = createStore("chatOrganizer", {
       // Right-click context menu on chat.
       el.addEventListener('contextmenu', function(ev) {
         if (!self._active) return;
+        // Avoid opening the long-press menu in the middle of an active touch drag.
+        if (self.pointerDrag && self.pointerDrag.active) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          return;
+        }
         const ctxid = el.getAttribute('data-ctxid');
         if (ctxid) {
           ev.preventDefault();
@@ -805,6 +811,7 @@ export const store = createStore("chatOrganizer", {
     this.pointerDrag = {
       ctxid,
       sourceEl: el,
+      pointerType: ev.pointerType || 'mouse',
       startX: ev.clientX,
       startY: ev.clientY,
       x: ev.clientX,
@@ -843,12 +850,22 @@ export const store = createStore("chatOrganizer", {
     const dy = ev.clientY - drag.startY;
     const distance = Math.hypot(dx, dy);
     const elapsed = Date.now() - (drag.startTime || 0);
-    // Activate drag only when the user has clearly committed to it: either moved
-    // a meaningful distance (10px) or held the pointer for 150ms with some movement.
-    // This prevents normal clicks with slight pointer drift from being treated as drags.
+    // Mouse keeps the existing threshold. Touch activates only on clear horizontal
+    // intent so vertical swipes remain native chat-list scrolling.
     if (!drag.active) {
-      const shouldActivate = distance >= 10 || (elapsed >= 150 && distance >= 4);
-      if (!shouldActivate) return;
+      if (drag.pointerType === 'touch') {
+        const ax = Math.abs(dx);
+        const ay = Math.abs(dy);
+        if (ay >= 10 && ay > ax) {
+          this._abortPointerDrag();
+          return;
+        }
+        const touchActivate = ax >= 12 && ax > ay * 1.25;
+        if (!touchActivate) return;
+      } else {
+        const shouldActivate = distance >= 10 || (elapsed >= 150 && distance >= 4);
+        if (!shouldActivate) return;
+      }
     }
 
     ev.preventDefault();

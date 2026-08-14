@@ -172,7 +172,7 @@
     .co-action-btn { padding: 2px; color: var(--co-text) !important; border: 1px solid var(--co-border); background: rgba(15,23,42,0.45); }
     .co-action-btn:hover { background: var(--co-row-hover-bg); color: var(--co-active-text) !important; }
     .co-action-btn .material-symbols-outlined { font-size: 16px; color: currentColor !important; }
-    .co-tree-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
+    .co-tree-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 
     .co-folder-row,
     .co-filter-row {
@@ -336,7 +336,8 @@
     .co-menu-danger:hover { background: #7f1d1d; color: #ffffff !important; }
     .co-menu-divider { margin: 4px 0; border: none; border-top: 1px solid var(--co-border); }
 
-    .chats-config-list .chat-container.co-chat-draggable { cursor: grab; touch-action: none; }
+    /* Preserve native vertical scrolling on mobile while retaining horizontal drag intent. */
+    .chats-config-list .chat-container.co-chat-draggable { cursor: grab; touch-action: pan-y; }
     .chats-config-list .chat-container.co-chat-dragging { opacity: 0.42; filter: saturate(0.8); }
     .chat-organizer-root .co-pointer-drop-target {
       background: rgba(37,99,235,0.30) !important;
