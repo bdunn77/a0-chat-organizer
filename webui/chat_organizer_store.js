@@ -1,6 +1,7 @@
 import { createStore } from "/js/AlpineStore.js";
 import { callJsonApi } from "/js/api.js";
 import { toastFrontendError, toastFrontendSuccess, toastFrontendInfo } from "/components/notifications/notification-store.js";
+import { store as sidebarStore } from "/components/sidebar/sidebar-store.js";
 
 const PLUGIN = "chat_organizer";
 const CHAT_DRAG_TYPE = "application/x-chat-organizer-ctxid";
@@ -99,8 +100,15 @@ export const store = createStore("chatOrganizer", {
   _lastChatIdsSignature: '',
   _observerPending: false,
   _reconcilePersistTimer: null,
+  _sortRegistered: false,
 
   init() {
+    if (!this._sortRegistered) {
+      sidebarStore.registerRowListExtension("chat", PLUGIN, {
+        sort: (items) => this._sortChatRows(items),
+      });
+      this._sortRegistered = true;
+    }
     if (!this.tree) this.loadTree();
   },
 
@@ -400,6 +408,43 @@ export const store = createStore("chatOrganizer", {
   getChatsStore() { return window.Alpine?.store("chats"); },
   getAllChats() { return this.getChatsStore()?.contexts || []; },
 
+  _sortChatRows(items) {
+    const order = (this.tree?.visible_order?.length
+      ? this.tree.visible_order
+      : this._loadLocalVisibleOrder()) || [];
+    if (!order.length) return [...items];
+    const rank = new Map(order.map((id, index) => [id, index]));
+    return [...items]
+      .map((item, index) => ({ item, index }))
+      .sort((left, right) => {
+        const leftRank = rank.has(left.item?.id) ? rank.get(left.item.id) : order.length + left.index;
+        const rightRank = rank.has(right.item?.id) ? rank.get(right.item.id) : order.length + right.index;
+        return leftRank - rightRank || left.index - right.index;
+      })
+      .map(({ item }) => item);
+  },
+
+  _orderedChatIds() {
+    return this._sortChatRows(this.getAllChats()).map(ctx => ctx.id).filter(Boolean);
+  },
+
+  _renderedChatIds() {
+    const chats = this.getChatsStore();
+    if (!chats) return [];
+    const result = [];
+    for (const parent of chats.topLevelContexts?.() || []) {
+      if (!parent?.id) continue;
+      result.push(parent.id);
+      // Child rows remain in the DOM when collapsed because the core template
+      // uses x-show, not x-if. Include them all so subsequent rows are tagged
+      // with the correct IDs in both expanded and collapsed states.
+      for (const child of chats.childContexts?.(parent.id) || []) {
+        if (child?.id) result.push(child.id);
+      }
+    }
+    return result;
+  },
+
   getOrphanIds() {
     const assigned = collectAssignedIds(this.tree?.folders || []);
     const ids = this.getAllChats().filter(c => !assigned.has(c.id)).map(c => c.id);
@@ -473,57 +518,14 @@ export const store = createStore("chatOrganizer", {
   },
 
   _syncChatsStoreOrder() {
-    // Apply saved order to the default chat list so reordering in the sidebar
-    // visually persists. Folder membership is NEVER changed here.
-    //
-    // Strategy: if a unified visible_order is saved (from drag-reorder in the
-    // sidebar), use it directly. Otherwise fall back to: orphan_order first,
-    // then folder chats in folder order. Untracked/new chats are appended.
+    // Current Agent Zero owns the contexts array and refreshes it from sync
+    // snapshots. Visual ordering is supplied through sidebarStore's supported
+    // row-list extension API (registered in init), rather than mutating that
+    // core array and having the next snapshot immediately undo the reorder.
     const chats = this.getChatsStore();
     if (!chats?.contexts?.length || !this.tree) return;
-
-    const current = chats.contexts;
-    const byId = new Map(current.map(ctx => [ctx.id, ctx]));
-    const used = new Set();
-    const ordered = [];
-
-    const visibleOrder = (this.tree?.visible_order?.length ? this.tree.visible_order : this._loadLocalVisibleOrder()) || [];
-    if (visibleOrder.length > 0) {
-      // Use the unified saved order
-      for (const id of visibleOrder) {
-        if (byId.has(id) && !used.has(id)) {
-          ordered.push(byId.get(id));
-          used.add(id);
-        }
-      }
-    } else {
-      // Fallback: orphans first, then folder chats
-      for (const id of this.getOrphanIds()) {
-        if (byId.has(id) && !used.has(id)) {
-          ordered.push(byId.get(id));
-          used.add(id);
-        }
-      }
-      const pushFolder = (folder) => {
-        for (const id of folder.chat_ids || []) {
-          if (byId.has(id) && !used.has(id)) {
-            ordered.push(byId.get(id));
-            used.add(id);
-          }
-        }
-        for (const child of folder.children || []) pushFolder(child);
-      };
-      for (const folder of this.tree?.folders || []) pushFolder(folder);
-    }
-
-    // Anything not yet placed (brand-new chats) appended at end
-    for (const ctx of current) {
-      if (!used.has(ctx.id)) ordered.push(ctx);
-    }
-
-    if (ordered.length !== current.length) return;
-    const changed = ordered.some((ctx, i) => ctx.id !== current[i]?.id);
-    if (changed) chats.contexts = [...ordered];
+    // No direct contexts mutation is needed: topLevelContexts()/childContexts()
+    // invoke the registered sorter whenever Alpine evaluates the chat rows.
   },
 
   // Filtering: show/hide default chat-container elements
@@ -675,15 +677,17 @@ export const store = createStore("chatOrganizer", {
   },
 
   _tagChatItems() {
-    const chats = this.getAllChats();
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
     const items = list.querySelectorAll('.chat-container');
+    const renderedIds = this._renderedChatIds();
     items.forEach((el, i) => {
-      if (chats[i]) {
-        // Always refresh: Alpine may reuse DOM nodes when contexts are reordered.
-        el.setAttribute('data-ctxid', chats[i].id);
-      }
+      // Always refresh: Alpine may reuse DOM nodes when rows are reordered.
+      // Use the actual rendered parent/child sequence, not the raw contexts
+      // array, whose order and membership differ for hierarchical chats.
+      const ctxid = renderedIds[i];
+      if (ctxid) el.setAttribute('data-ctxid', ctxid);
+      else el.removeAttribute('data-ctxid');
     });
   },
 
@@ -1079,7 +1083,7 @@ export const store = createStore("chatOrganizer", {
       return;
     }
 
-    const allIds = this.getAllChats().map(ctx => ctx.id).filter(Boolean);
+    const allIds = this._orderedChatIds();
 
     // Remove dragged from current full order, then re-insert at drop point.
     const withoutDragged = allIds.filter(id => id !== draggedCtxid);
@@ -1101,7 +1105,7 @@ export const store = createStore("chatOrganizer", {
     // backend persistence completes (or before Agent Zero has restarted with
     // the latest backend handler). Folder membership unchanged.
     this.tree ||= { folders: [], orphan_order: [], visible_order: [] };
-    this.tree.visible_order = newVisibleOrder;
+    this.tree = { ...this.tree, visible_order: newVisibleOrder };
     this._saveLocalVisibleOrder(newVisibleOrder);
     this._syncChatsStoreOrder();
     this._applyFilter();

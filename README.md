@@ -87,3 +87,7 @@ Chat clicks now register reliably even when the pointer drifts slightly during t
 ## Reactive Updates (v1.6.2)
 
 Folder chat counts now update immediately when chats are deleted: the plugin reconciles its folder tree, orphan order, and visible order against the live chat list and removes stale IDs. The observer batches rapid sidebar DOM mutations into a single microtask update for snappier response, and a lightweight 1.2s polling fallback catches changes that do not trigger DOM mutations (e.g., backend push updates). Backend persistence of reconciled order is debounced.
+
+## Current Sidebar Reorder Compatibility (v1.6.4)
+
+Chat ordering now uses Agent Zero's supported sidebar row-list extension API instead of mutating the WebSocket-owned chat contexts array. Drag targets are tagged from the actual rendered parent/child chat tree, fixing reorder failures and incorrect targets after the sidebar gained hierarchical chats.
