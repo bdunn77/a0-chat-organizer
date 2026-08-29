@@ -91,3 +91,7 @@ Folder chat counts now update immediately when chats are deleted: the plugin rec
 ## Current Sidebar Reorder Compatibility (v1.6.4)
 
 Chat ordering now uses Agent Zero's supported sidebar row-list extension API instead of mutating the WebSocket-owned chat contexts array. Drag targets are tagged from the actual rendered parent/child chat tree, fixing reorder failures and incorrect targets after the sidebar gained hierarchical chats.
+
+## Hierarchical Chat Filtering (v1.6.5)
+
+Folder filters now evaluate parent and child chat rows independently. A matching child remains visible even when its parent does not match or the parent chat tree is collapsed. This fix incorporates the still-relevant filtering portion of community contribution [#4](https://github.com/bdunn77/a0-chat-organizer/pull/4) by [@Jehu](https://github.com/Jehu).
