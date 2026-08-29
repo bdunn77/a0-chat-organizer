@@ -95,3 +95,7 @@ Chat ordering now uses Agent Zero's supported sidebar row-list extension API ins
 ## Hierarchical Chat Filtering (v1.6.5)
 
 Folder filters now evaluate parent and child chat rows independently. A matching child remains visible even when its parent does not match or the parent chat tree is collapsed. This fix incorporates the still-relevant filtering portion of community contribution [#4](https://github.com/bdunn77/a0-chat-organizer/pull/4) by [@Jehu](https://github.com/Jehu).
+
+## New Chat Placement (v1.6.6)
+
+New chats that are not yet part of the saved custom order now appear at the top of the sidebar in Agent Zero's native newest-first order. Previously, the saved-order sorter appended all newly created chats to the bottom.

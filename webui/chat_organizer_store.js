@@ -415,11 +415,14 @@ export const store = createStore("chatOrganizer", {
     if (!order.length) return [...items];
     const rank = new Map(order.map((id, index) => [id, index]));
     return [...items]
-      .map((item, index) => ({ item, index }))
+      .map((item, index) => ({ item, index, known: rank.has(item?.id) }))
       .sort((left, right) => {
-        const leftRank = rank.has(left.item?.id) ? rank.get(left.item.id) : order.length + left.index;
-        const rightRank = rank.has(right.item?.id) ? rank.get(right.item.id) : order.length + right.index;
-        return leftRank - rightRank || left.index - right.index;
+        // The core supplies new chats newest-first. Keep chats not yet present in
+        // visible_order at the top in that native order; saved chats follow in
+        // the user's explicit order. A drag will persist the new chat normally.
+        if (left.known !== right.known) return left.known ? 1 : -1;
+        if (!left.known) return left.index - right.index;
+        return rank.get(left.item.id) - rank.get(right.item.id) || left.index - right.index;
       })
       .map(({ item }) => item);
   },
