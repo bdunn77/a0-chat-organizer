@@ -99,3 +99,9 @@ Folder filters now evaluate parent and child chat rows independently. A matching
 ## New Chat Placement (v1.6.6)
 
 New chats that are not yet part of the saved custom order now appear at the top of the sidebar in Agent Zero's native newest-first order. Previously, the saved-order sorter appended all newly created chats to the bottom.
+
+## Continuous Compatibility Monitoring
+
+GitHub Actions checks this plugin against the latest Agent Zero `main` branch on every push and pull request, every Monday, and on manual runs. The suite validates frontend and backend syntax, ordering behavior, plugin conventions, and the Agent Zero sidebar/API contracts used by Chat Organizer.
+
+If a scheduled or `main` check fails, the workflow opens or updates one `[compatibility]` issue with a link to the failing run. After compatibility recovers, the same issue is automatically closed. The monitor reports breakage but never modifies or merges plugin code automatically.
