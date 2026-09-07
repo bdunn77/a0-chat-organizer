@@ -35,7 +35,7 @@ usr/plugins/chat_organizer/
 
 ## How it works
 
-- **Backend** — `tree_handler.py` persists folder data at `data/tree.json` and supports `get_tree`, `create_folder`, `rename_folder`, `delete_folder`, `move_chat`, `reorder`, and `set_orphan_order`.
+- **Backend** — `tree_handler.py` persists folder data at `usr/data/chat_organizer/tree.json` (outside the plugin directory, so Plugin Hub updates cannot wipe it) and supports `get_tree`, `create_folder`, `rename_folder`, `delete_folder`, `move_chat`, `reorder`, and `set_orphan_order`. Existing `usr/plugins/chat_organizer/data/tree.json` files are migrated automatically.
 - **Frontend** — the `chatOrganizer` Alpine store renders the folder panel, attaches drag/drop and right-click listeners to the default chat rows, and filters/reorders `$store.chats.contexts` without replacing the default sidebar DOM.
 - **File-drop overlay guard** — chat moves/reorders use custom pointer events instead of native file-style dragging, so Agent Zero's file attachment overlay does not appear during chat-only drags.
 - **Compatibility** — default chat rows remain in the DOM, preserving other chat sidebar plugins.
@@ -99,6 +99,10 @@ Folder filters now evaluate parent and child chat rows independently. A matching
 ## New Chat Placement (v1.6.6)
 
 New chats that are not yet part of the saved custom order now appear at the top of the sidebar in Agent Zero's native newest-first order. Previously, the saved-order sorter appended all newly created chats to the bottom.
+
+## Durable Folder Storage (v1.6.7)
+
+Folder data is stored at `usr/data/chat_organizer/tree.json` instead of inside the plugin directory. Replacing or updating the plugin no longer deletes folders. On first load after this update, Chat Organizer copies any existing `usr/plugins/chat_organizer/data/tree.json` into the durable location.
 
 ## Continuous Compatibility Monitoring
 

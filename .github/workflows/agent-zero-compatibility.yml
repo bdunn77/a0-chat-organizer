@@ -50,7 +50,12 @@ jobs:
       - name: Validate Python syntax
         id: python
         continue-on-error: true
-        run: python -m py_compile api/tree_handler.py tests/check_compatibility.py
+        run: python -m py_compile api/tree_handler.py tests/check_compatibility.py tests/check_persistence.py
+
+      - name: Test durable folder persistence
+        id: persistence
+        continue-on-error: true
+        run: python tests/check_persistence.py
 
       - name: Validate plugin and latest Agent Zero contracts
         id: contracts
@@ -65,6 +70,7 @@ jobs:
             "javascript=${{ steps.javascript.outcome }}"
             "sorter=${{ steps.sorter.outcome }}"
             "python=${{ steps.python.outcome }}"
+            "persistence=${{ steps.persistence.outcome }}"
             "contracts=${{ steps.contracts.outcome }}"
           )
           printf '%s\n' "${outcomes[@]}" | tee compatibility-results.txt

@@ -45,6 +45,9 @@ def check_plugin() -> None:
     require(any(isinstance(base, ast.Name) and base.id == "ApiHandler" for base in handlers[0].bases), "TreeHandler subclasses ApiHandler")
     process = next((node for node in handlers[0].body if isinstance(node, ast.AsyncFunctionDef) and node.name == "process"), None)
     require(process is not None and [arg.arg for arg in process.args.args] == ["self", "input", "request"], "TreeHandler implements async process(self, input, request)")
+    require('USER_DIR, "data", "chat_organizer", "tree.json"' in backend, "backend stores folders outside the plugin directory")
+    require("_migrate_legacy_tree" in backend, "backend migrates legacy plugin-local tree.json")
+    require('_LEGACY_TREE_FILE = _PLUGIN_ROOT / "data" / "tree.json"' in backend, "backend still knows the legacy plugin data path")
 
     html = read(ROOT / "extensions" / "webui" / "sidebar-chats-list-start" / "chat_organizer.html")
     require('<template x-if="$store.chatOrganizer">' in html, "frontend uses the Alpine store gate")

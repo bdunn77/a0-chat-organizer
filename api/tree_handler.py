@@ -11,36 +11,97 @@ from helpers.api import ApiHandler, Input, Output, Request, Response
 # ---------------------------------------------------------------------------
 # Persistence helpers
 # ---------------------------------------------------------------------------
+# Folder data used to live at <plugin>/data/tree.json. Plugin Hub updates and
+# reinstalls replace that directory, which made user folders disappear. Durable
+# state now lives under usr/data/chat_organizer/, with a one-time migration.
 
-_TREE_FILE = Path(__file__).resolve().parent.parent / "data" / "tree.json"
+_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+_LEGACY_TREE_FILE = _PLUGIN_ROOT / "data" / "tree.json"
 
 
-def _load_tree() -> dict[str, Any]:
-    """Load the folder tree from the JSON data file, ensuring a valid shape."""
-    if not _TREE_FILE.exists():
-        return _default_tree()
+def _durable_tree_file() -> Path:
     try:
-        raw = json.loads(_TREE_FILE.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return _default_tree()
-    if not isinstance(raw, dict):
-        return _default_tree()
-    raw.setdefault("folders", [])
-    raw.setdefault("orphan_order", [])
-    raw.setdefault("visible_order", [])
-    return raw
+        from helpers import files as a0_files
 
-
-def _save_tree(tree: dict[str, Any]) -> None:
-    """Persist the tree to disk atomically."""
-    _TREE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _TREE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(tree, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, _TREE_FILE)
+        return Path(
+            a0_files.get_abs_path(
+                a0_files.USER_DIR, "data", "chat_organizer", "tree.json"
+            )
+        )
+    except Exception:
+        pass
+    for parent in _PLUGIN_ROOT.parents:
+        if parent.name == "usr":
+            return parent / "data" / "chat_organizer" / "tree.json"
+        if parent.name == "plugins" and parent.parent.name == "usr":
+            return parent.parent / "data" / "chat_organizer" / "tree.json"
+    return _LEGACY_TREE_FILE
 
 
 def _default_tree() -> dict[str, Any]:
     return {"folders": [], "orphan_order": [], "visible_order": []}
+
+
+def _normalize_tree(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    raw.setdefault("folders", [])
+    raw.setdefault("orphan_order", [])
+    raw.setdefault("visible_order", [])
+    if not isinstance(raw["folders"], list):
+        raw["folders"] = []
+    if not isinstance(raw["orphan_order"], list):
+        raw["orphan_order"] = []
+    if not isinstance(raw["visible_order"], list):
+        raw["visible_order"] = []
+    return raw
+
+
+def _tree_has_user_data(tree: dict[str, Any]) -> bool:
+    return bool(tree.get("folders") or tree.get("orphan_order") or tree.get("visible_order"))
+
+
+def _read_tree_file(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return _normalize_tree(json.loads(path.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _write_tree_file(path: Path, tree: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(tree, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _migrate_legacy_tree(durable: Path, legacy: Path) -> dict[str, Any] | None:
+    """Copy plugin-local folder data to the durable path once."""
+    legacy_tree = _read_tree_file(legacy)
+    if legacy_tree is None or not _tree_has_user_data(legacy_tree):
+        return None
+    durable_tree = _read_tree_file(durable)
+    if durable_tree is not None and _tree_has_user_data(durable_tree):
+        return durable_tree
+    _write_tree_file(durable, legacy_tree)
+    return legacy_tree
+
+
+def _load_tree() -> dict[str, Any]:
+    """Load the folder tree from durable storage, migrating legacy data if needed."""
+    durable = _durable_tree_file()
+    migrated = _migrate_legacy_tree(durable, _LEGACY_TREE_FILE)
+    if migrated is not None:
+        return migrated
+    loaded = _read_tree_file(durable) or _read_tree_file(_LEGACY_TREE_FILE)
+    return loaded if loaded is not None else _default_tree()
+
+
+def _save_tree(tree: dict[str, Any]) -> None:
+    """Persist the tree outside the plugin directory so updates cannot wipe it."""
+    _write_tree_file(_durable_tree_file(), tree)
 
 
 # ---------------------------------------------------------------------------
