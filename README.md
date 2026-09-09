@@ -106,7 +106,11 @@ Folder data is stored at `usr/data/chat_organizer/tree.json` instead of inside t
 
 ## Accurate Chat Counts (v1.6.8)
 
-Folder, Unfiled, and All Chats badges now count only top-level sidebar chats. Nested subordinate/parallel contexts and leftover children of deleted chats still exist in Agent Zero's context list, but they are not separate chats in the sidebar, so they no longer inflate the counts.
+Unfiled and All Chats badges count only top-level sidebar chats. Nested subordinate/parallel contexts and leftover children of deleted chats still exist in Agent Zero's context list, but they are not separate chats in the sidebar, so they no longer inflate those totals.
+
+## Keep Folder Membership (v1.6.9)
+
+Folder badges and saved folder assignments now keep every live chat that was filed, including leftover children of deleted parents. An empty chat list during first paint no longer wipes folders.
 
 ## Continuous Compatibility Monitoring
 

@@ -63,12 +63,13 @@ const folders = [
   },
 ];
 
+const liveIds = new Set(chats.map((ctx) => ctx.id));
 assertEqual("all chats ignore nested and leftover child contexts", countableChatIds(chats).size, 2);
-assertEqual("folder count ignores nested children even if they are filed", countTotalChats(folders[0], countableChatIds(chats)), 1);
+assertEqual("folder count keeps live assigned chats including leftover children", countTotalChats(folders[0], liveIds), 4);
 assertEqual("unfiled count is remaining top-level chats", countUnfiledChats(chats, folders), 1);
 assertEqual("stale stored IDs do not inflate folder counts", countTotalChats({
   chat_ids: ["parent-a", "deleted-chat", "child-a"],
   children: [],
-}, countableChatIds(chats)), 1);
+}, liveIds), 2);
 
 console.log("All chat counting checks passed.");

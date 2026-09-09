@@ -308,7 +308,7 @@ export const store = createStore("chatOrganizer", {
     } catch (e) {
       console.error("ChatOrganizer: failed to load tree", e);
       toastFrontendError("Failed to load folder tree", "Chat Organizer");
-      this.tree = { folders: [], orphan_order: [] };
+      if (!this.tree?.folders?.length) this.tree = { folders: [], orphan_order: [], visible_order: [] };
     }
   },
 
@@ -425,7 +425,9 @@ export const store = createStore("chatOrganizer", {
   },
 
   folderTotalChats(folder) {
-    return countTotalChats(folder, countableChatIds(this.getAllChats()));
+    // Folder membership is independent of sidebar nesting. Count every assigned
+    // chat that still exists, including leftover children of deleted parents.
+    return countTotalChats(folder, this._liveChatIds());
   },
 
   getChatsStore() { return window.Alpine?.store("chats"); },
@@ -634,6 +636,9 @@ export const store = createStore("chatOrganizer", {
   _reconcileTreeWithChats() {
     if (!this.tree) return false;
     const live = this._liveChatIds();
+    // The chats store can be empty during first paint or a failed sync. Never
+    // treat that as "all chats were deleted" or folders/membership get wiped.
+    if (live.size === 0) return false;
     let changed = false;
 
     const cleanFolder = (folder) => {
