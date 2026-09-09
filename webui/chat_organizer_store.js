@@ -34,9 +34,30 @@ function findFolderName(id, folders) {
   return folder ? folder.name : "";
 }
 
-function countTotalChats(folder) {
-  let n = (folder.chat_ids || []).length;
-  for (const child of folder.children || []) n += countTotalChats(child);
+function isTopLevelChat(ctx) {
+  // Nested subordinate/parallel contexts and leftover children of deleted
+  // parents live in chats.contexts, but the sidebar only lists chats without
+  // a parent_context_id. Counts must follow that same rule.
+  return Boolean(ctx?.id) && !ctx.parent_context_id;
+}
+
+function countableChatIds(chats) {
+  return new Set((chats || []).filter(isTopLevelChat).map((ctx) => ctx.id));
+}
+
+function countTotalChats(folder, countableIds = null) {
+  const ids = folder.chat_ids || [];
+  let n = countableIds ? ids.filter((id) => countableIds.has(id)).length : ids.length;
+  for (const child of folder.children || []) n += countTotalChats(child, countableIds);
+  return n;
+}
+
+function countUnfiledChats(chats, folders) {
+  const assigned = collectAssignedIds(folders);
+  let n = 0;
+  for (const id of countableChatIds(chats)) {
+    if (!assigned.has(id)) n += 1;
+  }
   return n;
 }
 
@@ -403,10 +424,13 @@ export const store = createStore("chatOrganizer", {
     this._saveExpandedState();
   },
 
-  folderTotalChats(folder) { return countTotalChats(folder); },
+  folderTotalChats(folder) {
+    return countTotalChats(folder, countableChatIds(this.getAllChats()));
+  },
 
   getChatsStore() { return window.Alpine?.store("chats"); },
   getAllChats() { return this.getChatsStore()?.contexts || []; },
+  getCountableChats() { return this.getAllChats().filter(isTopLevelChat); },
 
   _sortChatRows(items) {
     const order = (this.tree?.visible_order?.length
@@ -485,9 +509,10 @@ export const store = createStore("chatOrganizer", {
       }
     };
     for (const folder of this.tree?.folders || []) pushFolder(folder, 0);
-    const orphanCount = this.getOrphanIds().length;
-    rows.push({ key: "orphans-row", type: "orphans", count: orphanCount, depth: 0 });
-    rows.push({ key: "all-chats-row", type: "all", depth: 0 });
+    const chats = this.getAllChats();
+    const folders = this.tree?.folders || [];
+    rows.push({ key: "orphans-row", type: "orphans", count: countUnfiledChats(chats, folders), depth: 0 });
+    rows.push({ key: "all-chats-row", type: "all", count: countableChatIds(chats).size, depth: 0 });
     return rows;
   },
 

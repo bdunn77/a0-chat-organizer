@@ -104,6 +104,10 @@ New chats that are not yet part of the saved custom order now appear at the top 
 
 Folder data is stored at `usr/data/chat_organizer/tree.json` instead of inside the plugin directory. Replacing or updating the plugin no longer deletes folders. On first load after this update, Chat Organizer copies any existing `usr/plugins/chat_organizer/data/tree.json` into the durable location.
 
+## Accurate Chat Counts (v1.6.8)
+
+Folder, Unfiled, and All Chats badges now count only top-level sidebar chats. Nested subordinate/parallel contexts and leftover children of deleted chats still exist in Agent Zero's context list, but they are not separate chats in the sidebar, so they no longer inflate the counts.
+
 ## Continuous Compatibility Monitoring
 
 GitHub Actions checks this plugin against the latest Agent Zero `main` branch on every push and pull request, every Monday, and on manual runs. The suite validates frontend and backend syntax, ordering behavior, plugin conventions, and the Agent Zero sidebar/API contracts used by Chat Organizer.

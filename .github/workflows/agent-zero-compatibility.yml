@@ -47,6 +47,11 @@ jobs:
         continue-on-error: true
         run: node tests/check_sorter.mjs
 
+      - name: Test chat counting behavior
+        id: counts
+        continue-on-error: true
+        run: node tests/check_counts.mjs
+
       - name: Validate Python syntax
         id: python
         continue-on-error: true
@@ -69,6 +74,7 @@ jobs:
           outcomes=(
             "javascript=${{ steps.javascript.outcome }}"
             "sorter=${{ steps.sorter.outcome }}"
+            "counts=${{ steps.counts.outcome }}"
             "python=${{ steps.python.outcome }}"
             "persistence=${{ steps.persistence.outcome }}"
             "contracts=${{ steps.contracts.outcome }}"
