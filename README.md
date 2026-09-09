@@ -112,6 +112,10 @@ Unfiled and All Chats badges count only top-level sidebar chats. Nested subordin
 
 Folder badges and saved folder assignments now keep every live chat that was filed, including leftover children of deleted parents. An empty chat list during first paint no longer wipes folders.
 
+## Show Leftover Folder Chats (v1.6.10)
+
+Clicking a folder now shows every live chat assigned to it, including leftover children of deleted parents. Agent Zero does not render those chats as normal sidebar rows, so Chat Organizer temporarily promotes them to top-level while the folder is selected. All Chats and Unfiled still hide them.
+
 ## Continuous Compatibility Monitoring
 
 GitHub Actions checks this plugin against the latest Agent Zero `main` branch on every push and pull request, every Monday, and on manual runs. The suite validates frontend and backend syntax, ordering behavior, plugin conventions, and the Agent Zero sidebar/API contracts used by Chat Organizer.

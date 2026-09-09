@@ -63,6 +63,8 @@ def check_plugin() -> None:
     require("function isTopLevelChat(" in store, "plugin distinguishes top-level chats from nested contexts")
     require("countUnfiledChats(" in store, "plugin counts unfiled top-level chats")
     require("countableChatIds(" in store, "plugin counts only top-level chats")
+    require("function strandedChatIds(" in store, "plugin identifies leftover children of deleted parents")
+    require("_syncStrandedFolderChats()" in store, "plugin surfaces leftover folder chats in the sidebar")
     require("touchActivate = ax >= 12 && ax > ay * 1.25" in store, "touch drag requires horizontal intent")
     require("if (ay >= 10 && ay > ax)" in store, "vertical touch intent cancels drag")
     require(re.search(r"chats\.contexts\s*=", store) is None, "plugin does not replace the WebSocket-owned contexts array")

@@ -30,13 +30,15 @@ const helpers = [
   extractFunction("countableChatIds"),
   extractFunction("countTotalChats"),
   extractFunction("countUnfiledChats"),
+  extractFunction("strandedChatIds"),
 ].join("\n\n");
 
 const {
   countableChatIds,
   countTotalChats,
   countUnfiledChats,
-} = Function(`${helpers}\nreturn { countableChatIds, countTotalChats, countUnfiledChats };`)();
+  strandedChatIds,
+} = Function(`${helpers}\nreturn { countableChatIds, countTotalChats, countUnfiledChats, strandedChatIds };`)();
 
 function assertEqual(label, actual, expected) {
   if (actual !== expected) {
@@ -71,5 +73,15 @@ assertEqual("stale stored IDs do not inflate folder counts", countTotalChats({
   chat_ids: ["parent-a", "deleted-chat", "child-a"],
   children: [],
 }, liveIds), 2);
+assertEqual(
+  "folder filter promotes leftover children of deleted parents",
+  strandedChatIds(chats, ["parent-a", "child-a", "orphan-child", "filed-child"]).join(","),
+  "orphan-child",
+);
+assertEqual(
+  "nested children of live parents stay nested",
+  strandedChatIds(chats, ["child-a", "filed-child"]).join(","),
+  "",
+);
 
 console.log("All chat counting checks passed.");

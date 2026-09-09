@@ -45,6 +45,20 @@ function countableChatIds(chats) {
   return new Set((chats || []).filter(isTopLevelChat).map((ctx) => ctx.id));
 }
 
+function strandedChatIds(chats, assignedIds) {
+  // Live chats whose parent is gone never get a sidebar row. If they are filed
+  // in a folder, promote them to top-level while that folder is selected.
+  const live = new Set((chats || []).map((ctx) => ctx?.id).filter(Boolean));
+  const assigned = assignedIds instanceof Set ? assignedIds : new Set(assignedIds || []);
+  const ids = [];
+  for (const ctx of chats || []) {
+    if (!ctx?.id || !assigned.has(ctx.id) || !ctx.parent_context_id) continue;
+    if (live.has(ctx.parent_context_id)) continue;
+    ids.push(ctx.id);
+  }
+  return ids;
+}
+
 function countTotalChats(folder, countableIds = null) {
   const ids = folder.chat_ids || [];
   let n = countableIds ? ids.filter((id) => countableIds.has(id)).length : ids.length;
@@ -122,6 +136,7 @@ export const store = createStore("chatOrganizer", {
   _observerPending: false,
   _reconcilePersistTimer: null,
   _sortRegistered: false,
+  _promotedParents: {},
 
   init() {
     if (!this._sortRegistered) {
@@ -151,6 +166,8 @@ export const store = createStore("chatOrganizer", {
     this._abortPointerDrag();
     this._hideAttachmentOverlay();
     this._stopObserver();
+    this.activeFilter = null;
+    this._syncStrandedFolderChats();
     this._clearFilter();
     this._removeChatInteractions();
   },
@@ -571,7 +588,48 @@ export const store = createStore("chatOrganizer", {
     this._applyFilter();
   },
 
+  _syncStrandedFolderChats() {
+    const chats = this.getChatsStore();
+    const contexts = chats?.contexts;
+    if (!Array.isArray(contexts)) return false;
+
+    const previous = this._promotedParents || {};
+    let changed = false;
+    for (const ctx of contexts) {
+      if (!ctx?.id || !(ctx.id in previous)) continue;
+      if (ctx.parent_context_id !== previous[ctx.id]) {
+        ctx.parent_context_id = previous[ctx.id];
+        changed = true;
+      }
+    }
+
+    const folder = this.activeFilter ? findFolder(this.activeFilter, this.tree?.folders || []) : null;
+    if (!folder) {
+      this._promotedParents = {};
+    } else {
+      const assigned = new Set(collectFolderChatIds(folder));
+      const toPromote = new Set(strandedChatIds(contexts, assigned));
+      const nextPromoted = {};
+      for (const ctx of contexts) {
+        if (!toPromote.has(ctx.id)) continue;
+        nextPromoted[ctx.id] = previous[ctx.id] ?? ctx.parent_context_id;
+        if (ctx.parent_context_id) {
+          ctx.parent_context_id = "";
+          changed = true;
+        }
+      }
+      this._promotedParents = nextPromoted;
+    }
+    if (changed) {
+      // In-place parent changes do not replace chats.contexts. A no-op splice
+      // notifies Alpine so topLevelContexts() re-renders the new rows.
+      contexts.splice(0, 0);
+    }
+    return changed;
+  },
+
   _applyFilter() {
+    this._syncStrandedFolderChats();
     const list = document.querySelector('.chats-config-list');
     if (!list) return;
     this._tagChatItems();
