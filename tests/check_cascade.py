@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from cascade import (  # noqa: E402
     collect_descendants,
+    collect_family_ids,
     collect_stranded_ids,
     ids_deleted_with_child,
     ids_deleted_with_parent,
@@ -59,6 +60,14 @@ def main() -> int:
     require(
         "parent-b" not in collect_stranded_ids(records),
         "live parents are not treated as stranded",
+    )
+    require(
+        collect_family_ids("child-a", records) == ["parent-a", "child-a", "grandchild-a"],
+        "filing a child includes its live parent and descendants",
+    )
+    require(
+        collect_family_ids("parent-b", records) == ["parent-b", "child-b"],
+        "filing a parent includes its children",
     )
     print("All cascade checks passed.")
     return 0

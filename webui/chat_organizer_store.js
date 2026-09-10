@@ -83,6 +83,34 @@ function collectDescendantChatIds(parentId, chats) {
   return out;
 }
 
+function collectRootChatId(ctxid, chats) {
+  const id = String(ctxid || "");
+  if (!id) return "";
+  const byId = new Map();
+  for (const ctx of chats || []) {
+    if (ctx?.id) byId.set(ctx.id, ctx);
+  }
+  const seen = new Set();
+  let current = id;
+  while (current) {
+    if (seen.has(current)) return current;
+    seen.add(current);
+    const parent = byId.get(current)?.parent_context_id;
+    if (!parent || !byId.has(parent)) return current;
+    current = parent;
+  }
+  return id;
+}
+
+function collectFamilyChatIds(ctxid, chats) {
+  const id = String(ctxid || "");
+  if (!id) return [];
+  const root = collectRootChatId(id, chats) || id;
+  const family = [root, ...collectDescendantChatIds(root, chats)];
+  if (!family.includes(id)) family.push(id);
+  return family;
+}
+
 function countTotalChats(folder, countableIds = null) {
   const ids = folder.chat_ids || [];
   let n = countableIds ? ids.filter((id) => countableIds.has(id)).length : ids.length;
@@ -135,6 +163,49 @@ function findFolderForChat(ctxid, folders) {
     if (found) return found;
   }
   return null;
+}
+
+function removeChatFromFolders(folders, ctxid) {
+  walkFolders(folders, (folder) => {
+    const ids = folder.chat_ids || [];
+    if (ids.includes(ctxid)) folder.chat_ids = ids.filter((id) => id !== ctxid);
+  });
+}
+
+function syncFamilyMembership(folders, chats) {
+  // If any live parent/child in a relationship is filed, keep the whole family
+  // in that same folder. Unfiled families are left unfiled.
+  let changed = false;
+  const seen = new Set();
+  for (const ctx of chats || []) {
+    const id = ctx?.id;
+    if (!id || seen.has(id)) continue;
+    const family = collectFamilyChatIds(id, chats);
+    for (const member of family) seen.add(member);
+    if (family.length < 2) continue;
+    let target = null;
+    for (const member of family) {
+      target = findFolderForChat(member, folders);
+      if (target) break;
+    }
+    if (!target) continue;
+    const chatIds = target.chat_ids || (target.chat_ids = []);
+    for (const member of family) {
+      const current = findFolderForChat(member, folders);
+      if (current === target) continue;
+      removeChatFromFolders(folders, member);
+      if (!chatIds.includes(member)) chatIds.push(member);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function removeFromOrphanOrder(tree, ids) {
+  if (!tree) return;
+  const remove = new Set(ids || []);
+  if (!remove.size) return;
+  tree.orphan_order = (tree.orphan_order || []).filter((id) => !remove.has(id));
 }
 
 export const store = createStore("chatOrganizer", {
@@ -432,9 +503,10 @@ export const store = createStore("chatOrganizer", {
 
   async moveChat(ctxid, folderId = "", position = null) {
     try {
-      await api("move_chat", { ctxid, folder_id: folderId || "", position });
+      const family = collectFamilyChatIds(ctxid, this.getAllChats());
+      await api("move_chat", { ctxid, ctxids: family, folder_id: folderId || "", position });
       await this.loadTree();
-      toastFrontendSuccess("Chat moved", "Chat Organizer");
+      toastFrontendSuccess(family.length > 1 ? "Chat family moved" : "Chat moved", "Chat Organizer");
     } catch (e) {
       console.error("ChatOrganizer: move chat failed", e);
       toastFrontendError("Failed to move chat", "Chat Organizer");
@@ -758,6 +830,13 @@ export const store = createStore("chatOrganizer", {
       for (const child of folder.children || []) cleanFolder(child);
     };
     for (const folder of this.tree.folders || []) cleanFolder(folder);
+
+    const chats = this.getAllChats();
+    if (syncFamilyMembership(this.tree.folders || [], chats)) {
+      const assigned = collectAssignedIds(this.tree.folders || []);
+      removeFromOrphanOrder(this.tree, [...assigned]);
+      changed = true;
+    }
 
     const beforeOrphans = (this.tree.orphan_order || []).length;
     this.tree.orphan_order = (this.tree.orphan_order || []).filter(id => live.has(id));

@@ -1,4 +1,4 @@
-"""Pure parent/child helpers for Chat Organizer cascade delete."""
+"""Pure parent/child helpers for Chat Organizer cascade delete and family filing."""
 
 from __future__ import annotations
 
@@ -91,3 +91,34 @@ def ids_deleted_with_child(child_id: str, records: dict[str, dict[str, Any]]) ->
     parent = parent_id_from_record(records.get(child_id))
     deleted = [child_id, *collect_descendants(child_id, records)]
     return [ctxid for ctxid in deleted if ctxid != parent]
+
+
+def collect_root_id(ctxid: str, records: dict[str, dict[str, Any]]) -> str:
+    """Walk up live parent_context_id links to the top-level chat in the family."""
+    ctxid = str(ctxid or "").strip()
+    if not ctxid:
+        return ""
+    live = {str(key).strip() for key in records if str(key).strip()}
+    seen: set[str] = set()
+    current = ctxid
+    while current:
+        if current in seen:
+            return current
+        seen.add(current)
+        parent = parent_id_from_record(records.get(current))
+        if not parent or parent not in live:
+            return current
+        current = parent
+    return ctxid
+
+
+def collect_family_ids(ctxid: str, records: dict[str, dict[str, Any]]) -> list[str]:
+    """Return the live root plus all descendants for a parent/child relationship."""
+    ctxid = str(ctxid or "").strip()
+    if not ctxid:
+        return []
+    root = collect_root_id(ctxid, records) or ctxid
+    family = [root, *collect_descendants(root, records)]
+    if ctxid not in family:
+        family.append(ctxid)
+    return family

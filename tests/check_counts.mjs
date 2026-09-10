@@ -32,6 +32,11 @@ const helpers = [
   extractFunction("countUnfiledChats"),
   extractFunction("strandedChatIds"),
   extractFunction("collectDescendantChatIds"),
+  extractFunction("collectRootChatId"),
+  extractFunction("collectFamilyChatIds"),
+  extractFunction("findFolderForChat"),
+  extractFunction("removeChatFromFolders"),
+  extractFunction("syncFamilyMembership"),
 ].join("\n\n");
 
 const {
@@ -40,7 +45,9 @@ const {
   countUnfiledChats,
   strandedChatIds,
   collectDescendantChatIds,
-} = Function(`${helpers}\nreturn { countableChatIds, countTotalChats, countUnfiledChats, strandedChatIds, collectDescendantChatIds };`)();
+  collectFamilyChatIds,
+  syncFamilyMembership,
+} = Function(`${helpers}\nreturn { countableChatIds, countTotalChats, countUnfiledChats, strandedChatIds, collectDescendantChatIds, collectFamilyChatIds, syncFamilyMembership };`)();
 
 function assertEqual(label, actual, expected) {
   if (actual !== expected) {
@@ -95,5 +102,49 @@ assertEqual(
   collectDescendantChatIds("child-a", chats).join(","),
   "",
 );
+assertEqual(
+  "filing a child includes its live parent and descendants",
+  collectFamilyChatIds("child-a", chats.concat([{ id: "grandchild-a", parent_context_id: "child-a" }])).join(","),
+  "parent-a,child-a,grandchild-a",
+);
+assertEqual(
+  "filing a parent includes its children",
+  collectFamilyChatIds("parent-b", chats).join(","),
+  "parent-b,filed-child",
+);
+{
+  const familyFolders = [
+    { id: "folder-a", chat_ids: ["child-a"], children: [] },
+    { id: "folder-b", chat_ids: [], children: [] },
+  ];
+  syncFamilyMembership(familyFolders, chats);
+  assertEqual(
+    "filing a child also files its parent in the same folder",
+    familyFolders[0].chat_ids.join(","),
+    "child-a,parent-a",
+  );
+}
+{
+  const familyFolders = [
+    { id: "folder-a", chat_ids: ["parent-b"], children: [] },
+  ];
+  syncFamilyMembership(familyFolders, chats);
+  assertEqual(
+    "filing a parent also files its children in the same folder",
+    familyFolders[0].chat_ids.join(","),
+    "parent-b,filed-child",
+  );
+}
+{
+  const familyFolders = [
+    { id: "folder-a", chat_ids: ["parent-a"], children: [] },
+  ];
+  syncFamilyMembership(familyFolders, chats);
+  assertEqual(
+    "unrelated chats stay out of a family folder",
+    familyFolders[0].chat_ids.join(","),
+    "parent-a,child-a",
+  );
+}
 
 console.log("All chat counting checks passed.");

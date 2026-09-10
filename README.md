@@ -120,6 +120,10 @@ Clicking a folder now shows every live chat assigned to it, including leftover c
 
 Deleting a parent chat now also deletes its subordinate/parallel children. Deleting a child never deletes its parent. Leftover children of already-deleted parents are removed on startup so they cannot linger in folders.
 
+## File Parent/Child Families Together (v1.6.12)
+
+Moving a parent or child into a folder also files every live chat in that parent/child relationship. Unfiling one chat unfiles the whole family. Later-spawned children of a filed parent join the same folder automatically.
+
 ## Continuous Compatibility Monitoring
 
 GitHub Actions checks this plugin against the latest Agent Zero `main` branch on every push and pull request, every Monday, and on manual runs. The suite validates frontend and backend syntax, ordering behavior, plugin conventions, and the Agent Zero sidebar/API contracts used by Chat Organizer.

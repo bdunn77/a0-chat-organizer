@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 from helpers.api import ApiHandler, Input, Output, Request, Response
+
+if str(_PLUGIN_ROOT := Path(__file__).resolve().parent.parent) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_ROOT))
+
+from cascade import collect_family_ids  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -15,7 +21,6 @@ from helpers.api import ApiHandler, Input, Output, Request, Response
 # reinstalls replace that directory, which made user folders disappear. Durable
 # state now lives under usr/data/chat_organizer/, with a one-time migration.
 
-_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 _LEGACY_TREE_FILE = _PLUGIN_ROOT / "data" / "tree.json"
 
 
@@ -138,6 +143,116 @@ def _remove_chat_from_all_folders(folders: list[dict], ctxid: str) -> None:
         _remove_chat_from_all_folders(f.get("children", []), ctxid)
 
 
+def _find_folder_for_chat(folders: list[dict], ctxid: str) -> dict | None:
+    for folder in folders:
+        if ctxid in folder.get("chat_ids", []):
+            return folder
+        found = _find_folder_for_chat(folder.get("children", []), ctxid)
+        if found:
+            return found
+    return None
+
+
+def _live_chat_records() -> dict[str, dict]:
+    records: dict[str, dict] = {}
+    try:
+        from helpers import persist_chat
+
+        chats_dir = Path(persist_chat.get_chat_folder_path("_")).parent
+        if chats_dir.is_dir():
+            for folder in chats_dir.iterdir():
+                chat_file = folder / persist_chat.CHAT_FILE_NAME
+                if not folder.is_dir() or not chat_file.is_file():
+                    continue
+                try:
+                    data = json.loads(chat_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if isinstance(data, dict):
+                    records[folder.name] = data
+    except Exception:
+        pass
+    try:
+        from agent import AgentContext
+
+        for context in AgentContext.all():
+            records.setdefault(context.id, {
+                "id": context.id,
+                "output_data": dict(getattr(context, "output_data", None) or {}),
+            })
+    except Exception:
+        pass
+    return records
+
+
+def _family_ids_for_move(ctxid: str, requested: Any = None) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        cid = str(value or "").strip()
+        if cid and cid not in seen:
+            seen.add(cid)
+            ids.append(cid)
+
+    add(ctxid)
+    if isinstance(requested, list):
+        for value in requested:
+            add(value)
+    for value in collect_family_ids(ctxid, _live_chat_records()):
+        add(value)
+    return ids
+
+
+def _place_chats(container: list[str], ids: list[str], position: Any) -> None:
+    for cid in ids:
+        if cid in container:
+            container.remove(cid)
+    if isinstance(position, int) and 0 <= position <= len(container):
+        for offset, cid in enumerate(ids):
+            container.insert(position + offset, cid)
+    else:
+        container.extend(ids)
+
+
+def _sync_family_membership(tree: dict[str, Any], records: dict[str, dict] | None = None) -> bool:
+    """Keep each live parent/child family in one folder, or all unfiled."""
+    records = records if records is not None else _live_chat_records()
+    if not records:
+        return False
+    changed = False
+    seen: set[str] = set()
+    for ctxid in list(records):
+        cid = str(ctxid or "").strip()
+        if not cid or cid in seen:
+            continue
+        family = collect_family_ids(cid, records)
+        for member in family:
+            seen.add(member)
+        if len(family) < 2:
+            continue
+        target = _find_folder_for_chat(tree.get("folders", []), family[0])
+        if target is None:
+            for member in family[1:]:
+                target = _find_folder_for_chat(tree.get("folders", []), member)
+                if target is not None:
+                    break
+        if target is None:
+            continue
+        chat_ids = target.setdefault("chat_ids", [])
+        for member in family:
+            current = _find_folder_for_chat(tree.get("folders", []), member)
+            if current is target:
+                continue
+            _remove_chat_from_all_folders(tree.get("folders", []), member)
+            if member in tree.get("orphan_order", []):
+                tree["orphan_order"].remove(member)
+            if member not in chat_ids:
+                chat_ids.append(member)
+            changed = True
+    return changed
+
+
 # ---------------------------------------------------------------------------
 # Handler
 # ---------------------------------------------------------------------------
@@ -168,7 +283,10 @@ class TreeHandler(ApiHandler):
     # ------------------------------------------------------------------
 
     def _get_tree(self) -> Output:
-        return _load_tree()
+        tree = _load_tree()
+        if _sync_family_membership(tree):
+            _save_tree(tree)
+        return tree
 
     # ------------------------------------------------------------------
 
@@ -251,30 +369,25 @@ class TreeHandler(ApiHandler):
             return Response("ctxid is required", 400)
 
         tree = _load_tree()
+        family = _family_ids_for_move(ctxid, input.get("ctxids"))
 
-        # Remove from any existing folder + orphan list
-        _remove_chat_from_all_folders(tree["folders"], ctxid)
-        if ctxid in tree["orphan_order"]:
-            tree["orphan_order"].remove(ctxid)
+        # Remove the whole parent/child family from any existing folder + orphan list.
+        for member in family:
+            _remove_chat_from_all_folders(tree["folders"], member)
+            if member in tree["orphan_order"]:
+                tree["orphan_order"].remove(member)
 
         if folder_id:
             folder = _find_folder(tree["folders"], folder_id)
             if not folder:
                 return Response("Folder not found", 404)
-            chat_ids = folder.setdefault("chat_ids", [])
-            if isinstance(position, int) and 0 <= position < len(chat_ids):
-                chat_ids.insert(position, ctxid)
-            else:
-                chat_ids.append(ctxid)
+            _place_chats(folder.setdefault("chat_ids", []), family, position)
         else:
-            # Move to orphans (no folder)
-            if isinstance(position, int) and 0 <= position < len(tree["orphan_order"]):
-                tree["orphan_order"].insert(position, ctxid)
-            else:
-                tree["orphan_order"].append(ctxid)
+            # Move the whole family to Unfiled.
+            _place_chats(tree["orphan_order"], family, position)
 
         _save_tree(tree)
-        return {"ok": True}
+        return {"ok": True, "moved": family}
 
     # ------------------------------------------------------------------
 
@@ -361,6 +474,7 @@ class TreeHandler(ApiHandler):
                 orphan_ids.append(ctxid)
                 seen_orphans.add(ctxid)
         tree["orphan_order"] = orphan_ids
+        _sync_family_membership(tree)
 
         _save_tree(tree)
         return {"ok": True}
