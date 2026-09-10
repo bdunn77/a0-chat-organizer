@@ -59,6 +59,30 @@ function strandedChatIds(chats, assignedIds) {
   return ids;
 }
 
+function collectDescendantChatIds(parentId, chats) {
+  const parent = String(parentId || "");
+  if (!parent) return [];
+  const byParent = new Map();
+  for (const ctx of chats || []) {
+    const id = ctx?.id;
+    const parentCtx = ctx?.parent_context_id;
+    if (!id || !parentCtx || id === parent) continue;
+    if (!byParent.has(parentCtx)) byParent.set(parentCtx, []);
+    byParent.get(parentCtx).push(id);
+  }
+  const out = [];
+  const seen = new Set([parent]);
+  const stack = [...(byParent.get(parent) || [])];
+  while (stack.length) {
+    const id = stack.shift();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    stack.push(...(byParent.get(id) || []));
+  }
+  return out;
+}
+
 function countTotalChats(folder, countableIds = null) {
   const ids = folder.chat_ids || [];
   let n = countableIds ? ids.filter((id) => countableIds.has(id)).length : ids.length;
@@ -137,6 +161,8 @@ export const store = createStore("chatOrganizer", {
   _reconcilePersistTimer: null,
   _sortRegistered: false,
   _promotedParents: {},
+  _cascadeDeleting: false,
+  _killChatPatched: false,
 
   init() {
     if (!this._sortRegistered) {
@@ -145,11 +171,13 @@ export const store = createStore("chatOrganizer", {
       });
       this._sortRegistered = true;
     }
+    this._patchKillChat();
     if (!this.tree) this.loadTree();
   },
 
   onOpen() {
     this._active = true;
+    this._patchKillChat();
     this.loadTree();
     this._startObserver();
     this._restorePanelHeight();
@@ -170,6 +198,30 @@ export const store = createStore("chatOrganizer", {
     this._syncStrandedFolderChats();
     this._clearFilter();
     this._removeChatInteractions();
+  },
+
+  _patchKillChat() {
+    const chats = this.getChatsStore();
+    if (!chats || this._killChatPatched || typeof chats.killChat !== "function") return;
+    const original = chats.killChat.bind(chats);
+    const organizer = this;
+    chats.killChat = async function killChatWithChildren(id) {
+      if (!id || organizer._cascadeDeleting) return original(id);
+      const descendants = collectDescendantChatIds(id, organizer.getAllChats());
+      const result = await original(id);
+      if (!descendants.length) return result;
+      organizer._cascadeDeleting = true;
+      try {
+        for (const childId of descendants) {
+          if (!childId || childId === id) continue;
+          try { await original(childId); } catch (_e) {}
+        }
+      } finally {
+        organizer._cascadeDeleting = false;
+      }
+      return result;
+    };
+    this._killChatPatched = true;
   },
 
   // ── Resizable folder panel divider ──

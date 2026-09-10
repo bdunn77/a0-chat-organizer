@@ -55,12 +55,17 @@ jobs:
       - name: Validate Python syntax
         id: python
         continue-on-error: true
-        run: python -m py_compile api/tree_handler.py tests/check_compatibility.py tests/check_persistence.py
+        run: python -m py_compile api/tree_handler.py cascade.py tests/check_compatibility.py tests/check_persistence.py tests/check_cascade.py extensions/python/_functions/agent/AgentContext/remove/start/_40_cascade_delete_children.py extensions/python/startup_migration/_40_purge_stranded_chats.py
 
       - name: Test durable folder persistence
         id: persistence
         continue-on-error: true
         run: python tests/check_persistence.py
+
+      - name: Test parent-to-child cascade delete
+        id: cascade
+        continue-on-error: true
+        run: python tests/check_cascade.py
 
       - name: Validate plugin and latest Agent Zero contracts
         id: contracts
@@ -77,6 +82,7 @@ jobs:
             "counts=${{ steps.counts.outcome }}"
             "python=${{ steps.python.outcome }}"
             "persistence=${{ steps.persistence.outcome }}"
+            "cascade=${{ steps.cascade.outcome }}"
             "contracts=${{ steps.contracts.outcome }}"
           )
           printf '%s\n' "${outcomes[@]}" | tee compatibility-results.txt

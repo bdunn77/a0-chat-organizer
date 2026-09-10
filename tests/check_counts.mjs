@@ -31,6 +31,7 @@ const helpers = [
   extractFunction("countTotalChats"),
   extractFunction("countUnfiledChats"),
   extractFunction("strandedChatIds"),
+  extractFunction("collectDescendantChatIds"),
 ].join("\n\n");
 
 const {
@@ -38,7 +39,8 @@ const {
   countTotalChats,
   countUnfiledChats,
   strandedChatIds,
-} = Function(`${helpers}\nreturn { countableChatIds, countTotalChats, countUnfiledChats, strandedChatIds };`)();
+  collectDescendantChatIds,
+} = Function(`${helpers}\nreturn { countableChatIds, countTotalChats, countUnfiledChats, strandedChatIds, collectDescendantChatIds };`)();
 
 function assertEqual(label, actual, expected) {
   if (actual !== expected) {
@@ -81,6 +83,16 @@ assertEqual(
 assertEqual(
   "nested children of live parents stay nested",
   strandedChatIds(chats, ["child-a", "filed-child"]).join(","),
+  "",
+);
+assertEqual(
+  "parent delete collects descendants only",
+  collectDescendantChatIds("parent-a", chats).join(","),
+  "child-a",
+);
+assertEqual(
+  "child delete does not include the parent",
+  collectDescendantChatIds("child-a", chats).join(","),
   "",
 );
 
