@@ -8,10 +8,7 @@ from typing import Any
 
 from helpers.api import ApiHandler, Input, Output, Request, Response
 
-# Import cascade.py by file path under a unique module name. Never add the
-# plugin root to sys.path: doing so would make this plugin's top-level `api`
-# directory shadow Agent Zero core's `api` package for every later import in
-# the process (breaking e.g. `from api.message import Message` in core).
+# Import cascade.py by file path under a unique module name. Never add the plugin root to the system import path: doing so would make this plugin's top-level `api` directory shadow Agent Zero core's `api` package for every later import in the process (breaking e.g. `from api.message import Message` in core).
 # This keeps Chat Organizer fully self-contained and update-proof.
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
