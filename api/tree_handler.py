@@ -1,17 +1,35 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
 from helpers.api import ApiHandler, Input, Output, Request, Response
 
-if str(_PLUGIN_ROOT := Path(__file__).resolve().parent.parent) not in sys.path:
-    sys.path.insert(0, str(_PLUGIN_ROOT))
+# Import cascade.py by file path under a unique module name. Never add the
+# plugin root to sys.path: doing so would make this plugin's top-level `api`
+# directory shadow Agent Zero core's `api` package for every later import in
+# the process (breaking e.g. `from api.message import Message` in core).
+# This keeps Chat Organizer fully self-contained and update-proof.
+_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
-from cascade import collect_family_ids  # noqa: E402
+
+def _load_cascade():
+    cascade_path = _PLUGIN_ROOT / "cascade.py"
+    spec = importlib.util.spec_from_file_location(
+        "_chat_organizer_cascade", cascade_path
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load cascade module from {cascade_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_cascade = _load_cascade()
+collect_family_ids = _cascade.collect_family_ids
 
 
 # ---------------------------------------------------------------------------

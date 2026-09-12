@@ -124,6 +124,10 @@ Deleting a parent chat now also deletes its subordinate/parallel children. Delet
 
 Moving a parent or child into a folder also files every live chat in that parent/child relationship. Unfiling one chat unfiles the whole family. Later-spawned children of a filed parent join the same folder automatically.
 
+## No sys.path Pollution (v1.6.13)
+
+The backend no longer inserts the plugin directory into `sys.path` to import `cascade.py`; it now loads it by file path under a unique module name, and the plugin no longer ships `api/__init__.py`. Previously, adding the plugin root to `sys.path` let the plugin's `api/` folder shadow Agent Zero core's own `api` package, breaking core imports (for example `api.message_async`) after Agent Zero updates. This fix is structural: Chat Organizer can no longer collide with any core module, so future Agent Zero updates should not break it.
+
 ## Continuous Compatibility Monitoring
 
 GitHub Actions checks this plugin against the latest Agent Zero `main` branch on every push and pull request, every Monday, and on manual runs. The suite validates frontend and backend syntax, ordering behavior, plugin conventions, and the Agent Zero sidebar/API contracts used by Chat Organizer.
