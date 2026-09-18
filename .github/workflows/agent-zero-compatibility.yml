@@ -52,10 +52,15 @@ jobs:
         continue-on-error: true
         run: node tests/check_counts.mjs
 
+      - name: Boot the frontend store with stubbed core modules
+        id: frontend
+        continue-on-error: true
+        run: node tests/check_frontend_boot.mjs
+
       - name: Validate Python syntax
         id: python
         continue-on-error: true
-        run: python -m py_compile api/tree_handler.py cascade.py tests/check_compatibility.py tests/check_persistence.py tests/check_cascade.py extensions/python/_functions/agent/AgentContext/remove/start/_40_cascade_delete_children.py extensions/python/startup_migration/_40_purge_stranded_chats.py
+        run: python -m py_compile api/tree_handler.py cascade.py tests/check_compatibility.py tests/check_persistence.py tests/check_cascade.py tests/check_boot_smoke.py extensions/python/_functions/agent/AgentContext/remove/start/_40_cascade_delete_children.py extensions/python/startup_migration/_40_purge_stranded_chats.py
 
       - name: Test durable folder persistence
         id: persistence
@@ -66,6 +71,11 @@ jobs:
         id: cascade
         continue-on-error: true
         run: python tests/check_cascade.py
+
+      - name: Boot the backend handler end to end
+        id: boot
+        continue-on-error: true
+        run: python tests/check_boot_smoke.py
 
       - name: Validate plugin and latest Agent Zero contracts
         id: contracts
@@ -80,9 +90,11 @@ jobs:
             "javascript=${{ steps.javascript.outcome }}"
             "sorter=${{ steps.sorter.outcome }}"
             "counts=${{ steps.counts.outcome }}"
+            "frontend=${{ steps.frontend.outcome }}"
             "python=${{ steps.python.outcome }}"
             "persistence=${{ steps.persistence.outcome }}"
             "cascade=${{ steps.cascade.outcome }}"
+            "boot=${{ steps.boot.outcome }}"
             "contracts=${{ steps.contracts.outcome }}"
           )
           printf '%s\n' "${outcomes[@]}" | tee compatibility-results.txt

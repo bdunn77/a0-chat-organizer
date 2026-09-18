@@ -214,6 +214,9 @@ export const store = createStore("chatOrganizer", {
   chatContextMenu: null,    // chat context menu {ctxid, x, y}
   editingId: null,
   editValue: "",
+  creatingFolder: false,
+  createValue: "",
+  createParentId: null,
   expanded: {},
   panelHeight: null,
   activeFilter: null,
@@ -236,14 +239,23 @@ export const store = createStore("chatOrganizer", {
   _killChatPatched: false,
 
   init() {
-    if (!this._sortRegistered) {
-      sidebarStore.registerRowListExtension("chat", PLUGIN, {
-        sort: (items) => this._sortChatRows(items),
-      });
-      this._sortRegistered = true;
-    }
+    this._registerSorter();
     this._patchKillChat();
     if (!this.tree) this.loadTree();
+  },
+
+  // Register the supported chat-row sort extension defensively: if a future
+  // Agent Zero renames or removes it, the folder panel must still load.
+  _registerSorter() {
+    if (this._sortRegistered) return;
+    if (typeof sidebarStore?.registerRowListExtension !== "function") {
+      console.warn("ChatOrganizer: sidebar row-list extension API unavailable; custom chat order disabled");
+      return;
+    }
+    sidebarStore.registerRowListExtension("chat", PLUGIN, {
+      sort: (items) => this._sortChatRows(items),
+    });
+    this._sortRegistered = true;
   },
 
   onOpen() {
@@ -790,7 +802,11 @@ export const store = createStore("chatOrganizer", {
       });
 
       treeItem.style.display = parentVisible || childVisible ? '' : 'none';
-      if (childList) childList.classList.toggle('co-filter-forced-open', childVisible);
+      // Force the child list open ONLY for leftover children whose parent chat
+      // is not part of the filtered folder. When the parent row itself is
+      // visible, leave the child list to Alpine's x-show so the user's own
+      // expand/collapse still works inside a folder filter.
+      if (childList) childList.classList.toggle('co-filter-forced-open', childVisible && !parentVisible);
     });
   },
 
@@ -1391,9 +1407,38 @@ export const store = createStore("chatOrganizer", {
 
   isEditing(id) { return this.editingId === id; },
 
+  // Inline "new folder" entry. Native prompt() is unreliable/blocked in the
+  // embedded WebUI, which made the New Folder button appear to do nothing.
   showCreateFolder(parentId = null) {
-    const name = prompt("Folder name:");
-    if (name && name.trim()) this.createFolder(name.trim(), parentId);
+    this.createParentId = parentId || null;
+    this.createValue = "";
+    this.creatingFolder = true;
+    this.closeContextMenu();
+    if (parentId) this.expandFolderPath(parentId);
+    setTimeout(() => {
+      const id = parentId ? `co-new-folder-${parentId}` : "co-new-folder-input";
+      const el = document.getElementById(id);
+      if (el) {
+        el.focus();
+        if (el.select) el.select();
+      }
+    }, 60);
+  },
+
+  async finishCreateFolder() {
+    if (!this.creatingFolder) return;
+    const name = (this.createValue || "").trim();
+    const parentId = this.createParentId || null;
+    this.creatingFolder = false;
+    this.createValue = "";
+    this.createParentId = null;
+    if (name) await this.createFolder(name, parentId);
+  },
+
+  cancelCreateFolder() {
+    this.creatingFolder = false;
+    this.createValue = "";
+    this.createParentId = null;
   },
 
   // ── Drag-and-drop onto folders ──

@@ -7,6 +7,7 @@ import argparse
 import ast
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,30 @@ def require(condition: bool, message: str) -> None:
 def read(path: Path) -> str:
     require(path.is_file(), f"required file exists: {path}")
     return path.read_text(encoding="utf-8")
+
+
+def code_without_comments(path: Path) -> str:
+    """Return Python source with comments removed.
+
+    Guards must match real code, not prose. Checking raw text made the
+    "never touches sys.path" rule fail on a comment that merely explained why
+    sys.path is not used, which masked genuine regressions.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    editable = [list(line) for line in lines]
+    with path.open(encoding="utf-8") as handle:
+        for token in tokenize.generate_tokens(handle.readline):
+            if token.type != tokenize.COMMENT:
+                continue
+            (row, col), (end_row, end_col) = token.start, token.end
+            if row == end_row and 0 <= row - 1 < len(editable):
+                line = editable[row - 1]
+                for index in range(col, min(len(line), end_col)):
+                    # Preserve code characters exactly; only blank the comment span
+                    # so substring guards still match real code.
+                    if line and line[index] not in ("\n", "\r"):
+                        line[index] = " "
+    return "".join("".join(line) for line in editable)
 
 
 def check_plugin() -> None:
@@ -69,7 +94,7 @@ def check_plugin() -> None:
     require("_patchKillChat()" in store, "plugin cascades parent chat deletion to children")
     require("_cascadeDeleting" in store, "plugin does not recurse parent deletion from child deletion")
     require((ROOT / "cascade.py").is_file(), "plugin ships cascade-delete helpers")
-    require("sys.path" not in (ROOT / "api" / "tree_handler.py").read_text(encoding="utf-8"), "plugin backend never touches sys.path")
+    require("sys.path" not in code_without_comments(ROOT / "api" / "tree_handler.py"), "plugin backend never touches sys.path")
     require(not (ROOT / "api" / "__init__.py").exists(), "plugin api folder is not an importable package (cannot shadow core api)")
     require("_chat_organizer_cascade" in (ROOT / "api" / "tree_handler.py").read_text(encoding="utf-8"), "cascade loaded by file path under unique module name")
     require((ROOT / "extensions" / "python" / "_functions" / "agent" / "AgentContext" / "remove" / "start" / "_40_cascade_delete_children.py").is_file(), "plugin hooks AgentContext.remove for child cascade")
@@ -81,6 +106,42 @@ def check_plugin() -> None:
     require("touchActivate = ax >= 12 && ax > ay * 1.25" in store, "touch drag requires horizontal intent")
     require("if (ay >= 10 && ay > ax)" in store, "vertical touch intent cancels drag")
     require(re.search(r"chats\.contexts\s*=", store) is None, "plugin does not replace the WebSocket-owned contexts array")
+
+
+JS_IMPORT_RE = re.compile(r'import\s*\{([^}]*)\}\s*from\s*["\']([^"\']+)["\']')
+
+
+def js_exports(source: str) -> set:
+    """Collect named ES module exports (declarations and export {...} blocks)."""
+    names = set(re.findall(r"export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", source))
+    names.update(re.findall(r"export\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)", source))
+    for block in re.findall(r"export\s*\{([^}]*)\}", source):
+        for part in block.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            names.add(part.split(" as ")[-1].strip())
+    return names
+
+
+def check_frontend_imports(agent_zero: Path) -> None:
+    """Every symbol the plugin imports from core must still be exported upstream.
+
+    A renamed/removed upstream export breaks the plugin module at import time,
+    which no amount of string-presence checking on the plugin would catch.
+    """
+    store = read(ROOT / "webui" / "chat_organizer_store.js")
+    imports = JS_IMPORT_RE.findall(store)
+    require(len(imports) >= 4, f"plugin store declares its core module imports ({len(imports)} found)")
+    for names_blob, specifier in imports:
+        if not specifier.startswith("/"):
+            continue
+        target = agent_zero / "webui" / specifier.lstrip("/")
+        require(target.is_file(), f"Agent Zero still provides imported module: {specifier}")
+        exported = js_exports(target.read_text(encoding="utf-8"))
+        for name in [n.strip() for n in names_blob.split(",") if n.strip()]:
+            local = name.split(" as ")[0].strip()
+            require(local in exported, f"Agent Zero still exports '{local}' from {specifier}")
 
 
 def check_upstream(agent_zero: Path) -> None:
@@ -107,6 +168,7 @@ def check_upstream(agent_zero: Path) -> None:
     require(len(api_handlers) == 1, "Agent Zero exposes ApiHandler")
     process = next((node for node in api_handlers[0].body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "process"), None)
     require(process is not None and [arg.arg for arg in process.args.args] == ["self", "input", "request"], "Agent Zero ApiHandler process signature remains compatible")
+    check_frontend_imports(agent_zero)
 
 
 def main() -> int:

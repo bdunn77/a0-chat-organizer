@@ -22,6 +22,16 @@
         <div class="co-tree-scroll">
           <template x-if="$store.chatOrganizer.tree">
             <div>
+              <template x-if="$store.chatOrganizer.creatingFolder && !$store.chatOrganizer.createParentId">
+                <div class="co-new-folder-row">
+                  <span class="material-symbols-outlined co-toggle-icon">create_new_folder</span>
+                  <input id="co-new-folder-input" class="co-rename-input" placeholder="New folder name"
+                         x-model="$store.chatOrganizer.createValue"
+                         @keydown.enter="$store.chatOrganizer.finishCreateFolder()"
+                         @keydown.escape="$store.chatOrganizer.cancelCreateFolder()"
+                         @blur="$store.chatOrganizer.finishCreateFolder()">
+                </div>
+              </template>
               <template x-for="row in $store.chatOrganizer.getRows()" :key="row.key">
                 <div>
 
@@ -33,24 +43,36 @@
                          @dragenter="$store.chatOrganizer.dragOverFolder($event, row.folder.id)"
                          @dragover="$store.chatOrganizer.dragOverFolder($event, row.folder.id)"
                          @dragleave="$store.chatOrganizer.dragLeaveFolder($event, row.folder.id)"
-                         @drop="$store.chatOrganizer.dropOnFolder($event, row.folder.id)">
-                      <button class="co-toggle" @click="$store.chatOrganizer.toggleFolder(row.folder.id)">
+                         @drop="$store.chatOrganizer.dropOnFolder($event, row.folder.id)"
+                         @click="$store.chatOrganizer.setFilter(row.folder.id)"
+                         @contextmenu="$store.chatOrganizer.openContextMenu($event, row.folder.id)">
+                      <button class="co-toggle" @click.stop="(row.folder.children || []).length ? $store.chatOrganizer.toggleFolder(row.folder.id) : $store.chatOrganizer.setFilter(row.folder.id)">
                         <span class="material-symbols-outlined co-toggle-icon" x-text="$store.chatOrganizer.isExpanded(row.folder.id) ? 'folder_open' : 'folder'"></span>
                       </button>
                       <template x-if="$store.chatOrganizer.isEditing(row.folder.id)">
-                        <input :id="'co-rename-' + row.folder.id" class="co-rename-input" x-model="$store.chatOrganizer.editValue"
+                        <input :id="'co-rename-' + row.folder.id" class="co-rename-input" x-model="$store.chatOrganizer.editValue" @click.stop
                                @keydown.enter="$store.chatOrganizer.finishRename(row.folder.id)"
                                @keydown.escape="$store.chatOrganizer.cancelRename()"
                                @blur="$store.chatOrganizer.finishRename(row.folder.id)">
                       </template>
                       <template x-if="!$store.chatOrganizer.isEditing(row.folder.id)">
-                        <span class="co-folder-name" @click="$store.chatOrganizer.setFilter(row.folder.id)" @contextmenu="$store.chatOrganizer.openContextMenu($event, row.folder.id)" x-text="row.folder.name"></span>
+                        <span class="co-folder-name" x-text="row.folder.name"></span>
                       </template>
                       <span class="co-badge" x-text="$store.chatOrganizer.folderTotalChats(row.folder)"></span>
                       <button class="btn-icon-action co-menu-btn" @click.stop="$store.chatOrganizer.openContextMenu($event, row.folder.id)">
                         <span class="material-symbols-outlined">more_vert</span>
                       </button>
                     </div>
+                    <template x-if="$store.chatOrganizer.creatingFolder && $store.chatOrganizer.createParentId === row.folder.id">
+                      <div class="co-new-folder-row" :style="{ paddingLeft: (30 + row.depth * 24) + 'px' }">
+                        <span class="material-symbols-outlined co-toggle-icon">subdirectory_arrow_right</span>
+                        <input :id="'co-new-folder-' + row.folder.id" class="co-rename-input" placeholder="New subfolder name"
+                               x-model="$store.chatOrganizer.createValue"
+                               @keydown.enter="$store.chatOrganizer.finishCreateFolder()"
+                               @keydown.escape="$store.chatOrganizer.cancelCreateFolder()"
+                               @blur="$store.chatOrganizer.finishCreateFolder()">
+                      </div>
+                    </template>
                   </template>
 
                   <template x-if="row.type === 'orphans'">
@@ -319,6 +341,20 @@
       color: #ffffff !important;
       outline: none;
     }
+
+    .co-new-folder-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 6px;
+      min-height: 28px;
+      background: var(--co-row-bg);
+      border: 1px dashed var(--co-focus);
+      border-radius: 5px;
+      margin: 2px 0;
+    }
+
+    .co-new-folder-row .co-rename-input::placeholder { color: var(--co-dim-text); opacity: 0.9; }
 
     .co-context-menu {
       background: #0f172a;

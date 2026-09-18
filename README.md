@@ -128,6 +128,18 @@ Moving a parent or child into a folder also files every live chat in that parent
 
 The backend no longer inserts the plugin directory into `sys.path` to import `cascade.py`; it now loads it by file path under a unique module name, and the plugin no longer ships `api/__init__.py`. Previously, adding the plugin root to `sys.path` let the plugin's `api/` folder shadow Agent Zero core's own `api` package, breaking core imports (for example `api.message_async`) after Agent Zero updates. This fix is structural: Chat Organizer can no longer collide with any core module, so future Agent Zero updates should not break it.
 
+## Reliable Folder Clicks (v1.6.14)
+
+Folder filtering is now bound to the whole folder row instead of only its name text. Clicking the name, the chat-count badge, or the empty space on a row selects the folder. The expand/collapse control still folds subfolders and now also selects a folder that has no subfolders, so no click on a folder row is a dead click. The rename field no longer re-triggers row filtering, and right-clicking anywhere on a row opens the folder menu.
+
+## Collapsible Chats Inside Folders (v1.6.14)
+
+Parent chats that have subagent children now collapse and expand normally while a folder is selected. Folder filtering force-opens a child list only to reveal leftover children whose parent chat is outside the filtered folder; when the parent row itself is visible, Agent Zero keeps control of the expand/collapse state, exactly as it already did in All Chats.
+
+## Boot Smoke Tests and Compatibility Hardening (v1.6.14)
+
+`tests/check_boot_smoke.py` loads the real backend handler and drives folder create, rename, and delete, chat moves, reordering, and durable persistence against a temporary data directory. `tests/check_frontend_boot.mjs` imports the real store module with stubbed core modules and verifies store boot, sorter registration, safe degradation when a core sidebar API is missing, the inline New Folder flow, and the folder-filter collapse rules. The compatibility suite now also verifies that every symbol the plugin imports still exists in Agent Zero, and it ignores comments when checking that the backend never touches `sys.path`.
+
 ## Continuous Compatibility Monitoring
 
 GitHub Actions checks this plugin against the latest Agent Zero `main` branch on every push and pull request, every Monday, and on manual runs. The suite validates frontend and backend syntax, ordering behavior, plugin conventions, and the Agent Zero sidebar/API contracts used by Chat Organizer.
