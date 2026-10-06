@@ -1,5 +1,12 @@
 # Chat Organizer
 
+> **Deprecated — no longer maintained.**
+>
+> Agent Zero now includes built-in chat folder/organizer functionality, so this plugin is no longer needed.
+> This repository is kept for reference only and will not receive further updates, compatibility fixes, or support.
+>
+> **New installs are not recommended.** Use the built-in Agent Zero feature instead.
+
 Organize your Agent Zero chats with unlimited nested folders while keeping the default chat sidebar intact and compatible with other sidebar plugins.
 
 ## Features
